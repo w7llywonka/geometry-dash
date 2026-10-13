@@ -47,6 +47,8 @@ The local editor supports building and testing levels, undo/redo, saving, deleti
 
 ## Development
 
+The [reference research notes](docs/reference-research.md) track the user's viewing restrictions, source-access status, local findings, and the commercial-game behavior still awaiting verification.
+
 `src/engine.js` owns physics, collisions, rendering, and input. `src/levels.js` defines the original campaign and validates custom geometry. `src/editor.js` implements the local editor. `src/store.js` persists profiles, and `src/audio.js` generates original audio. `src/app.js` connects the interface to these modules.
 
 Each cloud task already has an isolated environment. Use the checkout under `/workspace/geometry-dash`; do not create an additional Git worktree unless explicitly requested.
