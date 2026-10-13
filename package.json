@@ -1,0 +1,15 @@
+{
+  "name": "geometry-dash-offline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "An original, offline, single-player geometric rhythm platformer for the web.",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "start": "node scripts/serve.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.js",
+    "check": "node scripts/check.mjs"
+  },
+  "engines": { "node": ">=22" }
+}

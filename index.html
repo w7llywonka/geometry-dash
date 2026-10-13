@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#111018" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+    <meta name="description" content="A fast, colorful rhythm platformer. Play an original singleplayer campaign, make your own levels, and take your best run further. Your progress stays on this device." />
+    <title>Geometry Dash — One more try.</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='4' width='56' height='56' rx='12' fill='%23d1ff56'/%3E%3Cpath d='M17 19h9v10h-9zm21 0h9v10h-9zM18 39h28v9H18z' fill='%23111018'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="src/app.js"></script>
+  </head>
+  <body>
+    <svg class="svg-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-8H9v8H4a1 1 0 0 1-1-1Z" /></symbol>
+      <symbol id="i-levels" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+      <symbol id="i-editor" viewBox="0 0 24 24"><path d="m16 3 5 5L9 20l-6 1 1-6Z"/><path d="m13 6 5 5M3 21l5-1"/></symbol>
+      <symbol id="i-cube" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 8h2v3H7zm8 0h2v3h-2zM7 15h10"/></symbol>
+      <symbol id="i-stats" viewBox="0 0 24 24"><path d="M4 20V10h4v10zm6 0V4h4v16zm6 0v-7h4v7"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><path d="m9 3-.5 3-2 1.2-2.8-1L1.8 11l2.4 2v2.3L2 17l2.9 4.5 2.7-1.1L10 22h4l.6-2.7 2.1-1.2 2.5 1.1 2.5-4.6-2.2-1.8v-2.5l2.2-1.8L19 4l-2.6 1.1L14 3Z" transform="translate(0 -1) scale(.98)"/><circle cx="12" cy="11" r="3.2"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 4 13 8L8 20Z"/></symbol>
+      <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2 3.1 6.4 7.1 1-5.1 5 .9 7.1-6-3.4-6 3.4.9-7.1-5.1-5 7.1-1Z"/></symbol>
+      <symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 8v8"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+      <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 8.5a2.5 2.5 0 1 1 4 2c-1.5 1-1.5 1.5-1.5 3M12 17h.01"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 5h3v14H7zm7 0h3v14h-3z"/></symbol>
+      <symbol id="i-restart" viewBox="0 0 24 24"><path d="M4 10a8 8 0 1 1 0 5M4 4v6h6"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6"/></symbol>
+      <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V3m0 1h14l-3 5 3 5H5"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+      <symbol id="i-volume" viewBox="0 0 24 24"><path d="M3 9h4l5-5v16l-5-5H3zm13-2a7 7 0 0 1 0 10m3-13a11 11 0 0 1 0 16"/></symbol>
+      <symbol id="i-bolt" viewBox="0 0 24 24"><path d="m13 2-9 12h7l-1 8 10-13h-8Z"/></symbol>
+    </svg>
+
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Main navigation">
+        <button type="button" class="brand" aria-label="Geometry Dash home" data-nav="home">
+          <span class="brand-cube" aria-hidden="true"><span></span></span>
+          <span class="brand-name">GEOMETRY<br/><b>DASH<span class="brand-dot">.</span></b></span>
+        </button>
+        <div class="nav-label">YOUR NEXT BEST RUN</div>
+        <nav class="main-nav">
+          <button type="button" class="nav-item active" data-nav="home"><svg><use href="#i-home"/></svg><span>Overview</span><span class="nav-active-dot"></span></button>
+          <button type="button" class="nav-item" data-nav="levels"><svg><use href="#i-levels"/></svg><span>Play levels</span></button>
+          <button type="button" class="nav-item" data-nav="editor"><svg><use href="#i-editor"/></svg><span>Level editor</span><span class="tiny-label">CREATE</span></button>
+          <button type="button" class="nav-item" data-nav="icons"><svg><use href="#i-cube"/></svg><span>Icon garage</span></button>
+          <button type="button" class="nav-item" data-nav="stats"><svg><use href="#i-stats"/></svg><span>Your progress</span></button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="offline-card"><span class="online-dot"></span><div><strong>Just you & the beat.</strong><span>Singleplayer. Saved locally.</span></div></div>
+          <button type="button" class="nav-item" id="help-open"><svg><use href="#i-help"/></svg><span>How to play</span><span class="keyboard-key">?</span></button>
+          <button type="button" class="nav-item" id="settings-open"><svg><use href="#i-settings"/></svg><span>Settings</span></button>
+          <div class="sidebar-footer">BUILT FOR ONE MORE TRY <svg aria-hidden="true"><use href="#i-arrow"/></svg></div>
+        </div>
+      </aside>
+
+      <main class="main-content" id="main-content">
+        <header class="topbar">
+          <div class="topbar-breadcrumb"><span class="breadcrumb-mark">/</span><span id="page-label">Overview</span></div>
+          <div class="topbar-right"><span class="local-indicator"><span class="online-dot"></span> LOCAL SAVE</span><span class="topbar-avatar" aria-label="Player icon"><svg><use href="#i-cube"/></svg></span></div>
+        </header>
+
+        <section id="home-screen" class="screen home-screen" aria-label="Overview">
+          <div class="hero">
+            <div class="hero-grid" aria-hidden="true"></div>
+            <div class="hero-copy">
+              <div class="eyebrow"><span class="eyebrow-line"></span> FIND YOUR FLOW</div>
+              <h1>GEOMETRY<br/><span>DASH<span class="hero-period">.</span></span></h1>
+              <p>One button. Infinite possibilities.<br/>Jump into the rhythm. Make every beat count.</p>
+              <div class="hero-actions"><button type="button" id="quick-play" class="btn btn-primary btn-large"><svg><use href="#i-play"/></svg>Let’s play<span class="btn-key">SPACE</span></button><button type="button" class="hero-explore" data-nav="levels">Explore levels<svg><use href="#i-arrow"/></svg></button></div>
+              <div class="hero-bottom"><span class="hero-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span>GET IN THE ZONE. GO THE DISTANCE.</span></div>
+            </div>
+            <div class="hero-art" aria-hidden="true">
+              <div class="art-orbit orbit-one"></div><div class="art-orbit orbit-two"></div>
+              <div class="floating-cross cross-one">+</div><div class="floating-cross cross-two">+</div>
+              <div class="art-speed speed-one"></div><div class="art-speed speed-two"></div><div class="art-speed speed-three"></div>
+              <div class="art-platform platform-back"></div><div class="art-platform platform-front"></div>
+              <div class="art-spike spike-one"></div><div class="art-spike spike-two"></div><div class="art-spike spike-three"></div>
+              <div class="art-cube"><div class="art-cube-face"><i class="cube-eye eye-one"></i><i class="cube-eye eye-two"></i><i class="cube-mouth"></i></div></div>
+              <div class="art-small-cube"></div><div class="art-ring"></div>
+              <span class="art-coordinate coordinate-one">X: 0182</span><span class="art-coordinate coordinate-two">KEEP MOVING →</span>
+            </div>
+            <div class="hero-corner"><span></span><span></span></div>
+          </div>
+
+          <div class="overview-stats">
+            <div class="overview-stat"><div class="stat-icon star-icon"><svg><use href="#i-star"/></svg></div><div><span class="stat-label">TOTAL STARS</span><strong id="total-stars">0</strong></div><span class="stat-note">Earn your shine</span></div>
+            <div class="overview-stat"><div class="stat-icon coin-icon"><svg><use href="#i-coin"/></svg></div><div><span class="stat-label">SECRET COINS</span><strong id="total-coins">0</strong></div><span class="stat-note">Take the detour</span></div>
+            <div class="overview-stat"><div class="stat-icon complete-icon"><svg><use href="#i-check"/></svg></div><div><span class="stat-label">LEVELS COMPLETE</span><strong id="total-complete">0</strong></div><span class="stat-note">One at a time</span></div>
+          </div>
+
+          <div class="section-heading"><div><div class="eyebrow small-eyebrow">THE NEXT CHALLENGE</div><h2>Good rhythm. Great runs.</h2></div><button type="button" class="text-link" data-nav="levels">All levels<svg><use href="#i-arrow"/></svg></button></div>
+          <div id="home-levels" class="home-levels"></div>
+
+          <div class="create-banner"><div class="create-banner-icon" aria-hidden="true"><svg><use href="#i-editor"/></svg><span>+</span></div><div class="create-banner-copy"><span class="eyebrow small-eyebrow">YOUR RULES. YOUR RHYTHM.</span><h3>Got a level in your head?</h3><p>Build it. Play it. Make the impossible possible.</p></div><button type="button" class="btn btn-secondary" data-nav="editor">Open the editor<svg><use href="#i-arrow"/></svg></button><div class="banner-lines" aria-hidden="true"></div></div>
+        </section>
+
+        <section id="levels-screen" class="screen" hidden aria-label="Play levels">
+          <div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span> BUILT TO CHALLENGE YOU</div><h1>Pick your <span>next run.</span></h1><p>Every level is a new rhythm. Find yours and go all the way.</p></div>
+          <div class="catalog-toolbar"><div class="segmented-control" aria-label="Level type"><button type="button" class="active" data-mode="all">All levels</button><button type="button" data-mode="classic">Classic</button><button type="button" data-mode="platformer">Platformer</button></div><div class="catalog-filters"><label class="search-field"><svg><use href="#i-search"/></svg><input type="search" id="level-search" placeholder="Find a level…" aria-label="Search levels" /></label><select id="difficulty-filter" aria-label="Filter by difficulty"><option value="all">All difficulties</option><option value="Easy">Easy</option><option value="Normal">Normal</option><option value="Hard">Hard</option><option value="Harder">Harder</option><option value="Insane">Insane</option><option value="Demon">Demon</option></select></div></div>
+          <div id="level-grid" class="level-grid"></div>
+        </section>
+
+        <section id="editor-screen" class="screen" hidden aria-label="Level editor"><div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span> MADE BY YOU</div><h1>Build your <span>own beat.</span></h1><p>Your imagination, a blank canvas, and a whole lot of possibilities.</p></div><div id="editor-root"></div></section>
+        <section id="icons-screen" class="screen" hidden aria-label="Icon garage"><div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span> EXPRESS YOURSELF</div><h1>Make it <span>your own.</span></h1><p>A fresh look for your next best run. Pick your icon and colors.</p></div><div id="cosmetics-root"></div></section>
+        <section id="stats-screen" class="screen" hidden aria-label="Your progress"><div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span> EVERY ATTEMPT COUNTS</div><h1>Look how far <span>you’ve come.</span></h1><p>Personal bests, hard-earned stars, and all those one-more-tries.</p></div><div id="stats-root"></div></section>
+
+        <footer class="main-footer"><span>AN ORIGINAL BROWSER RECREATION · SINGLEPLAYER</span><span>Your progress stays on this device <span class="online-dot"></span></span></footer>
+      </main>
+    </div>
+
+    <section id="game-screen" class="game-screen" hidden aria-label="Game">
+      <canvas id="game-canvas" tabindex="0" aria-label="Geometry Dash game. Space or click to jump. Arrow keys move in platformer levels."></canvas>
+      <div class="game-hud"><div class="game-hud-left"><button type="button" id="game-back" class="game-icon-btn" aria-label="Back to levels"><svg><use href="#i-back"/></svg></button><div><strong id="game-level-name">Level</strong><div class="game-info"><span id="game-mode">Cube</span><span class="game-info-dot">·</span><b id="game-attempt">ATTEMPT 1</b><span id="game-practice-label" hidden>Practice mode</span></div></div></div><div class="game-progress-wrap"><div class="game-progress-top"><span>YOUR RUN</span><strong id="game-progress">0%</strong></div><div class="game-progress-track"><div id="progress-fill"></div></div></div><div class="game-hud-right"><button type="button" id="game-restart" class="game-icon-btn" aria-label="Restart level" title="Restart (R)"><svg><use href="#i-restart"/></svg></button><button type="button" id="game-pause" class="game-icon-btn" aria-label="Pause game" title="Pause (Esc)"><svg><use href="#i-pause"/></svg></button></div></div>
+      <div class="game-bottom-bar"><div class="game-controls-hint"><span class="keyboard-key">SPACE</span> / tap to jump <span class="hint-separator">·</span> <span class="keyboard-key">R</span> restart</div><div class="practice-controls"><button type="button" id="game-checkpoint" class="btn btn-small btn-secondary" hidden><svg><use href="#i-flag"/></svg>Checkpoint</button><button type="button" id="game-practice" class="btn btn-small btn-secondary"><svg><use href="#i-flag"/></svg>Practice</button></div></div>
+      <div id="game-touch" class="game-touch"><div class="touch-direction"><button type="button" id="touch-left" aria-label="Move left">←</button><button type="button" id="touch-right" aria-label="Move right">→</button></div><button type="button" id="touch-jump" class="touch-jump" aria-label="Jump">JUMP <span>↑</span></button></div>
+      <div id="game-dialog" class="game-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="game-dialog-title"><div class="game-dialog-card"><div class="dialog-decoration" aria-hidden="true"><svg><use href="#i-bolt"/></svg></div><div class="eyebrow small-eyebrow">TAKE A BREATH. YOU’VE GOT THIS.</div><h2 id="game-dialog-title">Paused</h2><div id="game-dialog-body"></div><div class="game-dialog-actions"><button type="button" id="game-resume" class="btn btn-primary"><svg><use href="#i-play"/></svg>Keep going</button><button type="button" id="game-retry" class="btn btn-secondary"><svg><use href="#i-restart"/></svg>Try again</button><button type="button" id="game-menu" class="text-link">Back to levels<svg><use href="#i-arrow"/></svg></button></div></div></div>
+    </section>
+
+    <dialog id="settings-dialog" class="modal-dialog" aria-labelledby="settings-title"><div class="modal-top"><div><div class="eyebrow small-eyebrow">JUST THE WAY YOU LIKE IT</div><h2 id="settings-title">Settings</h2></div><button type="button" id="settings-close" class="icon-btn" aria-label="Close settings"><svg><use href="#i-close"/></svg></button></div><div class="settings-list"><label class="setting-row"><span><strong>Music</strong><small>The soundtrack to your next best run</small></span><input type="checkbox" id="music-toggle" checked /></label><label class="setting-row"><span><strong>Sound effects</strong><small>Jumps, portals, and little victories</small></span><input type="checkbox" id="sfx-toggle" checked /></label><label class="setting-row"><span><strong>Auto checkpoints</strong><small>Save your place in practice mode</small></span><input type="checkbox" id="autocheckpoint-toggle" checked /></label><label class="setting-row"><span><strong>Reduced motion</strong><small>Keep interface animations to a minimum</small></span><input type="checkbox" id="motion-toggle" /></label><label class="setting-volume" for="volume-slider"><span><svg><use href="#i-volume"/></svg><strong>Volume</strong></span><input type="range" id="volume-slider" min="0" max="1" step="0.05" value="0.5" /></label></div><div class="modal-note"><span class="online-dot"></span> Settings are saved automatically on this device.</div></dialog>
+
+    <dialog id="help-dialog" class="modal-dialog help-dialog" aria-labelledby="help-title"><div class="modal-top"><div><div class="eyebrow small-eyebrow">A LITTLE HEAD START</div><h2 id="help-title">Find your rhythm.</h2></div><button type="button" id="help-close" class="icon-btn" aria-label="Close help"><svg><use href="#i-close"/></svg></button></div><div class="help-intro">Keep moving, dodge the obstacles, and reach the finish. Timing is everything. So is trying again.</div><div class="help-control-row"><span class="keyboard-key">SPACE</span><span>Jump, fly, or switch gravity. Click or tap works too.</span></div><div class="help-control-row"><span class="keyboard-key">← →</span><span>Move left and right in platformer levels.</span></div><div class="help-control-row"><span class="keyboard-key">ESC</span><span>Pause and catch your breath.</span></div><div class="help-control-row"><span class="keyboard-key">R</span><span>Restart the current run.</span></div><div class="help-tip"><svg><use href="#i-flag"/></svg><div><strong>Practice makes progress.</strong><p>Turn on practice mode to place checkpoints and learn a tricky section. Complete the level in normal mode to earn its stars.</p></div></div><div class="modal-note">Original levels, visuals, and synthesized audio. All play and editing happen on your device.</div></dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
