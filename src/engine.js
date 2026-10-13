@@ -1,4 +1,8 @@
+import { Runtime } from './runtime.js';
+import { drawCubeIcon } from './icons.js';
+
 export const GAME_MODES = ['cube', 'ship', 'ball', 'ufo', 'wave', 'robot', 'spider', 'swing'];
+export const SPEED_TIERS = { slow: 220, normal: 310, fast: 380, faster: 460, fastest: 560 };
 
 const WIDTH = 960;
 const HEIGHT = 600;
@@ -10,10 +14,25 @@ const JUMP = 650;
 const TAU = Math.PI * 2;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const lerp = (a, b, t) => a + (b - a) * t;
+const approach = (value, target, amount) => value < target ? Math.min(target, value + amount) : Math.max(target, value - amount);
+
+function rotatePoint(x, y, cx, cy, degrees) {
+  const angle = degrees * Math.PI / 180;
+  return [cx + (x - cx) * Math.cos(angle) - (y - cy) * Math.sin(angle), cy + (x - cx) * Math.sin(angle) + (y - cy) * Math.cos(angle)];
+}
+
+function objectBox(object, fallback = 40) {
+  return { x: object.x, y: object.y, w: object.w || fallback, h: object.h || fallback };
+}
 
 function rgba(hex, alpha) {
   const value = /^#[\da-f]{6}$/i.test(hex || '') ? hex : '#9060ff';
   return `rgba(${parseInt(value.slice(1, 3), 16)},${parseInt(value.slice(3, 5), 16)},${parseInt(value.slice(5, 7), 16)},${alpha})`;
+}
+
+function shade(hex, amount) {
+  const value = /^#[\da-f]{6}$/i.test(hex || '') ? hex : '#2474de';
+  return `rgb(${[1, 3, 5].map((index) => Math.round(parseInt(value.slice(index, index + 2), 16) * amount)).join(',')})`;
 }
 
 function overlap(a, b) {
@@ -23,9 +42,9 @@ function overlap(a, b) {
 function triangleHitsRect(points, rect) {
   const corners = [[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x + rect.w, rect.y + rect.h], [rect.x, rect.y + rect.h]];
   const axes = [[1, 0], [0, 1]];
-  for (let index = 0; index < 3; index++) {
+  for (let index = 0; index < points.length; index++) {
     const a = points[index];
-    const b = points[(index + 1) % 3];
+    const b = points[(index + 1) % points.length];
     axes.push([-(b[1] - a[1]), b[0] - a[0]]);
   }
   for (const [ax, ay] of axes) {
@@ -40,9 +59,10 @@ function spikePoints(object) {
   const { x, y } = object;
   const w = object.w || 32;
   const h = object.h || 32;
-  return object.value === 'down' || object.rotation === 180
+  const points = object.value === 'down'
     ? [[x, y], [x + w, y], [x + w / 2, y + h]]
     : [[x, y + h], [x + w / 2, y], [x + w, y + h]];
+  return object.rotation ? points.map(([px, py]) => rotatePoint(px, py, x + w / 2, y + h / 2, object.rotation)) : points;
 }
 
 /** A deterministic, entirely local runner. World coordinates are independent of canvas size. */
@@ -64,11 +84,15 @@ export class GameEngine {
     this.listeners = [];
     this.accumulator = 0;
     this.camera = 0;
+    this.cameraY = 0;
+    this.mirrored = false;
+    this.nativeCheckpoint = null;
     this.frame = null;
     this.lastFrame = null;
     this.destroyed = false;
     this.pressed = false;
     this.pressBuffer = 0;
+    this.canvasPointerId = null;
     this.notification = null;
     this.bindInput();
     this.resize();
@@ -113,13 +137,21 @@ export class GameEngine {
     });
     this.listen(this.canvas, 'pointerdown', (event) => {
       if (event.button > 0) return;
+      if (this.canvasPointerId !== null && this.canvasPointerId !== event.pointerId) return;
       event.preventDefault();
+      this.canvasPointerId = event.pointerId;
       this.canvas.focus?.({ preventScroll: true });
       this.press();
     });
-    this.listen(window, 'pointerup', () => this.release());
-    this.listen(window, 'pointercancel', () => this.release());
+    const releaseCanvasPointer = (event) => {
+      if (this.canvasPointerId === null || event.pointerId !== this.canvasPointerId) return;
+      this.canvasPointerId = null;
+      this.release();
+    };
+    this.listen(window, 'pointerup', releaseCanvasPointer);
+    this.listen(window, 'pointercancel', releaseCanvasPointer);
     this.listen(window, 'blur', () => {
+      this.canvasPointerId = null;
       this.release();
       this.input.left = false;
       this.input.right = false;
@@ -146,15 +178,21 @@ export class GameEngine {
     this.render();
   }
 
-  start(level, { practice = false, platformer = !!level?.platformer, cosmetics = {}, settings = {} } = {}) {
+  get objects() { return this.runtime?.objects || this.level?.objects || []; }
+
+  start(level, { practice = false, platformer = !!level?.platformer, cosmetics = {}, settings = {}, testMode = false, startPositionId = null } = {}) {
     if (!level || !Number.isFinite(level.length) || level.length <= 0) throw new Error('A level needs a positive length.');
     this.destroyed = false;
     this.level = { ...level, objects: (level.objects || []).map((object, index) => ({ ...object, _key: object.id ?? index })) };
+    this.runtime = new Runtime({ objects: this.level.objects, onEvent: (event) => this.runtimeEvent(event) });
+    this.testMode = !!testMode;
+    this.startPositionId = this.testMode ? startPositionId : null;
     this.cosmetics = { primary: '#b8ff65', secondary: '#9b7bff', icon: 0, trail: 'spark', ...cosmetics };
     this.settings = { music: true, sfx: true, reducedMotion: false, autoCheckpoint: true, ...settings };
     this.audio?.setSettings?.(this.settings);
-    this.state = { status: 'playing', progress: 0, bestProgress: 0, attempts: 1, mode: 'cube', practice: !!practice, coins: 0, checkpointCount: 0, time: 0, playTime: 0, jumps: 0, deaths: 0, platformer: !!platformer, dual: false, mini: false, speed: level.speed || 310, gravity: 1, player: null };
+    this.state = { status: 'playing', progress: 0, bestProgress: 0, attempts: 1, mode: 'cube', practice: !!practice, coins: 0, checkpointCount: 0, nativeCheckpointCount: 0, time: 0, playTime: 0, jumps: 0, deaths: 0, platformer: !!platformer, testMode: this.testMode, dual: false, mini: false, speed: level.speed || 310, gravity: 1, direction: 1, mirrored: false, jetpack: false, player: null };
     this.checkpoints = [];
+    this.nativeCheckpoint = null;
     this.finishReported = false;
     this.accumulator = 0;
     this.lastFrame = null;
@@ -168,14 +206,20 @@ export class GameEngine {
   }
 
   makePlayer() {
-    return { x: 80, y: FLOOR - 16, prevX: 80, prevY: FLOOR - 16, vx: 0, vy: 0, gravity: 1, mode: 'cube', mini: false, grounded: true, rotation: 0, robotHold: 0, cooldown: 0 };
+    return { x: 80, y: FLOOR - 16, prevX: 80, prevY: FLOOR - 16, vx: 0, vy: 0, speed: this.level?.speed || 310, gravity: 1, gravityScale: 1, direction: 1, mode: 'cube', mini: false, grounded: true, rotation: 0, robotHold: 0, cooldown: 0, dash: null, surfaceId: null };
   }
 
   resetAttempt(useCheckpoint = true) {
+    this.runtime?.reset();
+    if (this.runtime) {
+      this.runtime.backgroundColor = this.level.backgroundColor || this.level.color || '#2474de';
+      this.runtime.groundColor = this.level.groundColor || this.level.color || '#2474de';
+    }
     this.player = this.makePlayer();
     this.player2 = null;
     this.speed = this.level.speed || 310;
     this.dual = false;
+    this.mirrored = false;
     this.activated.clear();
     this.collected.clear();
     this.trail = [];
@@ -186,7 +230,22 @@ export class GameEngine {
     this.deathTimer = 0;
     this.autoCheckpointTimer = 0;
     this.respawnTime = 0;
-    const checkpoint = useCheckpoint && this.state.practice && this.checkpoints.at(-1);
+    const start = this.testMode && this.objects.find((object) => object.type === 'startpos' && object.id === this.startPositionId);
+    if (start) {
+      this.player.x = start.x;
+      this.player.y = start.y ?? FLOOR - 16;
+      this.player.prevX = this.player.x;
+      this.player.prevY = this.player.y;
+      this.player.mode = GAME_MODES.includes(start.mode || start.value) ? (start.mode || start.value) : 'cube';
+      this.player.mini = !!start.mini;
+      this.player.gravity = start.gravity === -1 || start.gravity === 'reverse' ? -1 : 1;
+      this.player.direction = start.direction === -1 || start.direction === 'left' ? -1 : 1;
+      this.player.grounded = this.player.y >= FLOOR - (this.player.mini ? 10 : 16) || this.player.y <= CEILING + (this.player.mini ? 10 : 16);
+      this.speed = Number(start.speed) || SPEED_TIERS[start.speed] || this.speed;
+      this.player.speed = this.speed;
+      if (start.dual) this.setDual(true);
+    }
+    const checkpoint = useCheckpoint && (this.state.practice ? this.checkpoints.at(-1) : this.state.platformer ? this.nativeCheckpoint : null);
     if (checkpoint) {
       this.player = { ...checkpoint.player };
       this.player.prevX = this.player.x;
@@ -197,11 +256,16 @@ export class GameEngine {
       this.activated = new Set(checkpoint.activated);
       this.collected = new Set(checkpoint.collected);
       this.attemptTime = checkpoint.attemptTime;
+      this.mirrored = checkpoint.mirrored || false;
+      this.runtime?.restore(checkpoint.runtime);
+      if (checkpoint.audio) this.audio?.restore?.(checkpoint.audio);
       this.notification = { text: 'CHECKPOINT RESTORED', time: 1.15 };
     }
     this.camera = Math.max(0, this.player.x - 230);
+    this.cameraY = 0;
     this.state.status = 'playing';
     this.syncState();
+    if (useCheckpoint) this.audio?.startMusic?.(this.level.bpm || 128, { restart: !checkpoint });
   }
 
   press() {
@@ -230,7 +294,7 @@ export class GameEngine {
     this.state.status = this.prePauseStatus === 'dead' ? 'dead' : 'playing';
     this.lastFrame = null;
     this.accumulator = 0;
-    this.audio?.startMusic?.(this.level.bpm || 128);
+    this.audio?.startMusic?.(this.level.bpm || 128, { restart: false });
     this.emit();
     this.ensureLoop();
   }
@@ -240,7 +304,7 @@ export class GameEngine {
     this.state.attempts++;
     this.finishReported = false;
     this.resetAttempt(true);
-    this.audio?.startMusic?.(this.level.bpm || 128);
+    this.audio?.startMusic?.(this.level.bpm || 128, { restart: !(this.state.practice ? this.checkpoints.length : this.state.platformer && this.nativeCheckpoint) });
     this.emit();
     this.ensureLoop();
   }
@@ -248,6 +312,7 @@ export class GameEngine {
   setPractice(enabled) {
     this.state.practice = !!enabled;
     this.checkpoints = [];
+    this.nativeCheckpoint = null;
     this.state.checkpointCount = 0;
     this.state.attempts++;
     this.finishReported = false;
@@ -262,13 +327,75 @@ export class GameEngine {
     if (!this.state.practice || this.state.status !== 'playing') return false;
     const last = this.checkpoints.at(-1);
     if (last && Math.abs(last.player.x - this.player.x) < 16 && Math.abs(last.player.y - this.player.y) < 16) return false;
-    this.checkpoints.push({ player: { ...this.player }, player2: this.player2 ? { ...this.player2 } : null, speed: this.speed, dual: this.dual, activated: [...this.activated], collected: [...this.collected], attemptTime: this.attemptTime });
+    this.checkpoints.push(this.checkpointSnapshot());
     if (this.checkpoints.length > 60) this.checkpoints.shift();
     this.state.checkpointCount = this.checkpoints.length;
     this.autoCheckpointTimer = 0;
     if (!automatic) this.notification = { text: 'CHECKPOINT SAVED', time: 1.25 };
     this.emit();
     return true;
+  }
+
+  checkpointSnapshot() {
+    return {
+      player: structuredClone(this.player), player2: this.player2 ? structuredClone(this.player2) : null,
+      speed: this.speed, dual: this.dual, mirrored: this.mirrored,
+      activated: [...this.activated], collected: [...this.collected], attemptTime: this.attemptTime,
+      runtime: this.runtime?.snapshot(), audio: this.audio?.snapshot?.(),
+    };
+  }
+
+  nativeCheckpointAt(object) {
+    if (!this.state.platformer || this.state.practice || this.activated.has(`checkpoint:${object._key}`)) return;
+    this.activated.add(`checkpoint:${object._key}`);
+    this.state.nativeCheckpointCount++;
+    this.nativeCheckpoint = this.checkpointSnapshot();
+    this.notification = { text: 'CHECKPOINT REACHED', time: 1.5 };
+    this.burst(object.x + (object.w || 32) / 2, object.y, '#6dffcf', 16);
+    this.emit();
+  }
+
+  routedPlayers(object, collisionPlayer = this.player) {
+    const players = this.dual && this.player2 ? [this.player, this.player2] : [this.player];
+    const target = object.targetPlayer ?? object.player;
+    if (target === 'both' || target === 'all') return players;
+    if (target === 'one' || target === 'player1' || target === 1 || target === '1') return [this.player];
+    if (target === 'two' || target === 'player2' || target === 2 || target === '2') return this.player2 ? [this.player2] : [];
+    return [collisionPlayer];
+  }
+
+  runtimeEvent(event) {
+    if (!event || !this.player) return;
+    if (event.type === 'sfx') this.audio?.playSfx?.(event.soundId, { volume: event.volume, channel: event.channel ?? event.soundChannel ?? event.soundId });
+    else if (event.type === 'stop-sfx' || event.type === 'stopSfx') this.audio?.stopSfx?.(event.channel ?? event.soundChannel ?? event.soundId);
+    else if (event.type === 'end' || event.type === 'finish') this.complete();
+    else if (event.type === 'gravity') {
+      const players = this.routedPlayers(event, event.playerIndex === 1 ? this.player2 || this.player : this.player);
+      const value = event.gravityValue;
+      for (const player of players) {
+        if (value === 'normal') player.gravity = 1;
+        else if (value === 'reverse') player.gravity = -1;
+        else if (value === 'toggle') player.gravity *= -1;
+        else if (Number.isFinite(Number(value))) {
+          player.gravity = Number(value) < 0 ? -1 : 1;
+          player.gravityScale = Math.abs(Number(value));
+        }
+        player.grounded = false;
+      }
+    } else if (event.type === 'teleport') {
+      for (const player of this.routedPlayers(event)) this.teleportPlayer(player, event);
+    } else if (event.type === 'direction') {
+      for (const player of this.routedPlayers(event)) player.direction = event.direction === -1 || event.direction === 'left' ? -1 : 1;
+    }
+  }
+
+  setDual(enabled) {
+    if (enabled && !this.dual) this.player2 = {
+      ...structuredClone(this.player), y: FLOOR + CEILING - this.player.y,
+      prevY: FLOOR + CEILING - this.player.y, gravity: -this.player.gravity, vy: -this.player.vy,
+    };
+    if (!enabled) this.player2 = null;
+    this.dual = enabled;
   }
 
   removeCheckpoint() {
@@ -336,9 +463,18 @@ export class GameEngine {
     const wantsJump = this.pressed || this.pressBuffer > 0;
     this.pressBuffer = Math.max(0, this.pressBuffer - dt);
     const players = this.dual && this.player2 ? [this.player, this.player2] : [this.player];
-    // Portals affect the pair together before physics so a dual entrance has one shared transition.
-    this.activatePortals(this.player);
-    const activePlayers = this.dual && this.player2 ? [this.player, this.player2] : players.slice(0, 1);
+    const oldPositions = new Map(this.objects.map((object) => [object._key, [object.x, object.y]]));
+    this.runtime?.step(dt, { players });
+    if (this.state.status !== 'playing') return;
+    for (const player of players) {
+      if (player.grounded && player.surfaceId !== null) {
+        const surface = this.objects.find((object) => object._key === player.surfaceId && object.active !== false);
+        const previous = oldPositions.get(player.surfaceId);
+        if (surface && previous) { player.x += surface.x - previous[0]; player.y += surface.y - previous[1]; }
+      }
+      this.activatePortals(player);
+    }
+    const activePlayers = this.dual && this.player2 ? [this.player, this.player2] : [this.player];
     let jumped = false;
     for (const player of activePlayers) {
       if (this.state.status !== 'playing') break;
@@ -352,7 +488,10 @@ export class GameEngine {
     this.pressed = false;
     if (this.state.status !== 'playing') return;
     this.collectCoins();
-    this.camera = Math.max(0, this.player.x - (this.state.platformer ? 350 : 230));
+    const camera = this.runtime?.camera || {};
+    this.camera = camera.staticX !== null && camera.staticX !== undefined ? Number(camera.staticX) - WIDTH / 2 : Math.max(0, this.player.x - (this.state.platformer ? 350 : 230));
+    this.camera += Number(camera.offsetX) || 0;
+    this.cameraY = (camera.staticY !== null && camera.staticY !== undefined ? Number(camera.staticY) - HEIGHT / 2 : 0) + (Number(camera.offsetY) || 0);
     this.syncState();
     if (this.state.practice && this.settings.autoCheckpoint && this.autoCheckpointTimer >= 2.5 && this.safeCheckpoint()) this.checkpoint(true);
     if (this.player.x >= this.level.length) this.complete();
@@ -368,14 +507,25 @@ export class GameEngine {
     player.cooldown = Math.max(0, player.cooldown - dt);
     const half = player.mini ? 10 : 16;
     const mode = player.mode;
+    const speed = Number(player.speed) || this.speed;
+    for (const object of this.objects) {
+      if (object.once !== false || !['orb', 'pad'].includes(object.type)) continue;
+      const key = `${object.type}:${object._key}:${player === this.player2 ? 2 : 1}`;
+      const touching = object.type === 'orb'
+        ? Math.hypot(player.x - object.x, player.y - object.y) < (object.w || 36) / 2 + half + 12
+        : overlap({ x: player.x - half - 4, y: player.y - half - 4, w: half * 2 + 8, h: half * 2 + 8 }, { x: object.x, y: object.y - 7, w: object.w || 36, h: object.h || 16 });
+      if (!touching) this.activated.delete(key);
+    }
     let jumped = false;
     let orb = null;
     if (wantsJump) {
-      orb = this.level.objects.find((object) => object.type === 'orb' && Math.hypot(player.x - object.x, player.y - object.y) < (object.w || 36) * 0.5 + half + 8 && !this.activated.has(`orb:${object._key}:${player === this.player2 ? 2 : 1}`));
+      orb = this.objects.find((object) => object.active !== false && object.type === 'orb' && this.routedPlayers(object, player).includes(player) && Math.hypot(player.x - object.x, player.y - object.y) < (object.w || 36) * 0.5 + half + 8 && !this.activated.has(`orb:${object._key}:${player === this.player2 ? 2 : 1}`));
     }
     if (orb) {
-      this.applyImpulse(player, orb.value || 'yellow', false);
-      this.activated.add(`orb:${orb._key}:${player === this.player2 ? 2 : 1}`);
+      for (const current of this.routedPlayers(orb, player)) {
+        this.applyEffect(current, orb, false);
+        this.activated.add(`orb:${orb._key}:${current === this.player2 ? 2 : 1}`);
+      }
       this.burst(orb.x, orb.y, this.impulseColor(orb.value), 12);
       jumped = true;
     }
@@ -415,12 +565,12 @@ export class GameEngine {
     }
 
     if (mode === 'wave') {
-      player.vy = (this.input.held ? -1 : 1) * this.speed * (player.mini ? 1.5 : 1) * player.gravity;
+      player.vy = (this.input.held ? -1 : 1) * speed * (player.mini ? 1.5 : 1) * player.gravity;
     } else if (mode === 'ship') {
-      player.vy += (this.input.held ? -1500 : 1120) * player.gravity * dt;
+      player.vy += (this.input.held ? -1500 : 1120) * player.gravity * (player.gravityScale ?? 1) * dt;
       player.vy = clamp(player.vy, -440, 440);
     } else if (mode === 'swing') {
-      player.vy += 1000 * player.gravity * dt;
+      player.vy += 1000 * player.gravity * (player.gravityScale ?? 1) * dt;
       player.vy = clamp(player.vy, -470, 470);
     } else {
       let acceleration = mode === 'ufo' ? 1450 : GRAVITY;
@@ -428,13 +578,29 @@ export class GameEngine {
         acceleration = -480;
         player.robotHold -= dt;
       } else if (mode === 'robot') player.robotHold = 0;
-      player.vy += acceleration * player.gravity * dt;
+      player.vy += acceleration * player.gravity * (player.gravityScale ?? 1) * dt;
       player.vy = clamp(player.vy, -1050, 1050);
     }
-    player.vx = this.state.platformer ? ((this.input.right ? 1 : 0) - (this.input.left ? 1 : 0)) * this.speed : this.speed;
+    if (this.state.platformer) {
+      const direction = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
+      const maximum = Number(this.level.platformerSpeed) || speed;
+      const acceleration = direction ? (player.grounded ? 2600 : 1900) : (player.grounded ? 3200 : 900);
+      player.vx = approach(player.vx, direction * maximum, acceleration * dt);
+      if (direction) player.facing = direction;
+    } else player.vx = speed * (player.direction || 1);
+    if (player.dash) {
+      if ((this.input.held || player.dash.remaining > 0) && (player.dash.maximum === null || player.dash.maximum > 0)) {
+        const dash = player.dash;
+        player.vx = Math.cos(dash.angle) * dash.speed;
+        player.vy = Math.sin(dash.angle) * dash.speed;
+        dash.remaining -= dt;
+        if (dash.maximum !== null) dash.maximum -= dt;
+      } else { player.dash = null; player.vy = 0; }
+    }
     player.x = Math.max(half, player.x + player.vx * dt);
     player.y += player.vy * dt;
     player.grounded = false;
+    player.surfaceId = null;
     if (player.y + half >= FLOOR) {
       player.y = FLOOR - half;
       if (player.vy > 0) player.vy = 0;
@@ -446,8 +612,10 @@ export class GameEngine {
       player.grounded = player.gravity === -1;
     }
 
-    for (const object of this.level.objects) {
-      if (object.x > player.x + half + 90 || object.x + (object.w || 40) < player.x - half - 90) continue;
+    for (const object of this.objects) {
+      if (object.active === false) continue;
+      const radius = object.type === 'saw' ? Number(object.radius) || (object.w || 48) / 2 : 0;
+      if (object.x - radius > player.x + half + 8 || object.x + (radius || object.w || 40) < player.x - half - 8) continue;
       const box = { x: player.x - half, y: player.y - half, w: half * 2, h: half * 2 };
       if (object.type === 'spike') {
         const hurtbox = { x: box.x + 3, y: box.y + 3, w: box.w - 6, h: box.h - 6 };
@@ -455,6 +623,15 @@ export class GameEngine {
           this.die(player);
           return jumped;
         }
+      } else if (object.type === 'saw') {
+        const radius = Number(object.radius) || (object.w || 48) / 2;
+        const nearestX = clamp(object.x, box.x + 3, box.x + box.w - 3);
+        const nearestY = clamp(object.y, box.y + 3, box.y + box.h - 3);
+        if (Math.hypot(object.x - nearestX, object.y - nearestY) < radius * 0.85) { this.die(player); return jumped; }
+      } else if (object.type === 'slope') {
+        if (this.collideSlope(player, object, half)) { this.die(player); return jumped; }
+      } else if (object.type === 'checkpoint') {
+        if (overlap(box, objectBox(object, 32))) this.nativeCheckpointAt(object);
       } else if (object.type === 'block') {
         const block = { x: object.x, y: object.y, w: object.w || 40, h: object.h || 40 };
         if (!overlap(box, block)) continue;
@@ -464,10 +641,12 @@ export class GameEngine {
           player.y = block.y - half;
           player.vy = 0;
           player.grounded = player.gravity === 1;
+          player.surfaceId = player.grounded ? object._key : null;
         } else if (!['ship', 'wave', 'swing'].includes(mode) && wasBelow && player.vy <= 0) {
           player.y = block.y + block.h + half;
           player.vy = 0;
           player.grounded = player.gravity === -1;
+          player.surfaceId = player.grounded ? object._key : null;
         } else if (this.state.platformer && player.prevX + half <= block.x + 3) {
           player.x = block.x - half;
           player.vx = 0;
@@ -481,9 +660,11 @@ export class GameEngine {
       } else if (object.type === 'pad') {
         const key = `pad:${object._key}:${player === this.player2 ? 2 : 1}`;
         const pad = { x: object.x, y: object.y - 7, w: object.w || 36, h: object.h || 16 };
-        if (!this.activated.has(key) && overlap(box, pad)) {
-          this.activated.add(key);
-          this.applyImpulse(player, object.value || 'yellow', true);
+        if (!this.activated.has(key) && this.routedPlayers(object, player).includes(player) && overlap(box, pad)) {
+          for (const current of this.routedPlayers(object, player)) {
+            this.activated.add(`pad:${object._key}:${current === this.player2 ? 2 : 1}`);
+            this.applyEffect(current, object, true);
+          }
           this.burst(object.x + pad.w / 2, object.y, this.impulseColor(object.value), 12);
           jumped = true;
         }
@@ -504,8 +685,8 @@ export class GameEngine {
   spiderDestination(player) {
     const half = player.mini ? 10 : 16;
     let destination = player.gravity === 1 ? FLOOR - half : CEILING + half;
-    for (const object of this.level.objects) {
-      if (object.type !== 'block' || player.x + half <= object.x || player.x - half >= object.x + (object.w || 40)) continue;
+    for (const object of this.objects) {
+      if (object.active === false || !['block', 'slope'].includes(object.type) || player.x + half <= object.x || player.x - half >= object.x + (object.w || 40)) continue;
       if (player.gravity === 1 && object.y >= player.y + half) destination = Math.min(destination, object.y - half);
       if (player.gravity === -1 && object.y + (object.h || 40) <= player.y - half) destination = Math.max(destination, object.y + (object.h || 40) + half);
     }
@@ -513,7 +694,71 @@ export class GameEngine {
   }
 
   impulseColor(value) {
-    return { pink: '#ff64c4', red: '#ff6a66', blue: '#5ee6ff', green: '#aaff6e', black: '#e8e8ff' }[value] || '#ffe266';
+    return { pink: '#ff64c4', red: '#ff6a66', blue: '#5ee6ff', green: '#aaff6e', black: '#e8e8ff', dash: '#aaff6e', 'gravity-dash': '#ff64c4', spider: '#b391ff', teleport: '#5ee6ff', trigger: '#e8e8ff' }[value] || '#ffe266';
+  }
+
+  collideSlope(player, object, half) {
+    const { x, y, w, h } = objectBox(object, 96);
+    const points = object.value === 'down' ? [[x, y], [x + w, y + h], [x, y + h]] : [[x, y + h], [x + w, y], [x + w, y + h]];
+    const box = { x: player.x - half, y: player.y - half, w: half * 2, h: half * 2 };
+    if (player.x + half < x || player.x - half > x + w || !triangleHitsRect(points, box)) return false;
+    const surface = (px) => y + h * (object.value === 'down' ? clamp((px - x) / w, 0, 1) : 1 - clamp((px - x) / w, 0, 1));
+    const top = surface(player.x);
+    if (!['ship', 'wave', 'swing'].includes(player.mode) && player.gravity === 1 && player.vy >= 0 && player.prevY + half <= surface(player.prevX) + 10) {
+      player.y = top - half;
+      player.vy = 0;
+      player.grounded = true;
+      player.surfaceId = object._key;
+      return false;
+    }
+    if (player.gravity === -1 && player.prevY - half >= y + h - 3 && player.vy <= 0) {
+      player.y = y + h + half; player.vy = 0; player.grounded = true; player.surfaceId = object._key;
+      return false;
+    }
+    if (this.state.platformer && !['ship', 'wave', 'swing'].includes(player.mode)) {
+      player.x = player.prevX;
+      player.vx = 0;
+      return false;
+    }
+    return true;
+  }
+
+  applyEffect(player, object, pad = false) {
+    const value = object.value || 'yellow';
+    if (value === 'dash' || value === 'gravity-dash') {
+      if (value === 'gravity-dash') player.gravity *= -1;
+      const duration = Number(object.dashDuration ?? object.duration);
+      player.dash = { angle: (Number(object.angle) || 0) * Math.PI / 180, speed: Number(object.dashSpeed) || (player.speed || this.speed) * 1.8, remaining: pad ? duration || 0.25 : 0, maximum: Number.isFinite(duration) && duration > 0 ? duration : pad ? 0.25 : null };
+      player.grounded = false;
+    } else if (value === 'spider') {
+      const from = player.y;
+      player.gravity *= -1;
+      player.y = this.spiderDestination(player); player.prevY = player.y; player.vy = 0; player.grounded = true;
+      this.spiderBeam = { x: player.x, y1: from, y2: player.y, life: 0.14 };
+    } else if (value === 'teleport') this.teleportPlayer(player, object);
+    else if (value === 'trigger') this.runtime?.activate({ ...object, type: 'trigger', value: object.action || object.trigger || 'spawn', action: object.action || object.trigger || 'spawn' }, { player, players: this.dual && this.player2 ? [this.player, this.player2] : [this.player] });
+    else this.applyImpulse(player, value, pad);
+  }
+
+  teleportPlayer(player, object) {
+    let target = object.targetId !== undefined ? this.objects.find((candidate) => candidate.id === object.targetId || String(candidate._key) === String(object.targetId)) : null;
+    if (!target && object.targetGroup !== undefined) target = this.objects.find((candidate) => (candidate.groups || []).map(String).includes(String(object.targetGroup)) && candidate._key !== object._key);
+    const centered = target && ['orb', 'coin', 'saw', 'startpos'].includes(target.type);
+    const targetX = Number.isFinite(Number(object.targetX)) ? Number(object.targetX) : target ? target.x + (centered ? 0 : (target.w || 32) / 2) : null;
+    const targetY = Number.isFinite(Number(object.targetY)) ? Number(object.targetY) : target ? target.y + (centered ? 0 : (target.h || 32) / 2) : null;
+    if (targetX === null && targetY === null) return false;
+    const half = player.mini ? 10 : 16;
+    const before = { x: player.x, y: player.y };
+    if (targetX !== null) player.x = Math.max(half, targetX);
+    if (targetY !== null) player.y = clamp(targetY, CEILING + half, FLOOR - half);
+    player.prevX = player.x; player.prevY = player.y;
+    if (object.preserveVelocity !== true) { player.vx = 0; player.vy = 0; }
+    player.grounded = false;
+    player.dash = null;
+    if (target?.type === 'portal') this.activated.add(`portal:${target._key}:${player === this.player2 ? 2 : 1}`);
+    this.burst(before.x, before.y, '#61e8ff', 12);
+    this.burst(player.x, player.y, '#61e8ff', 12);
+    return true;
   }
 
   applyImpulse(player, value, pad) {
@@ -527,23 +772,40 @@ export class GameEngine {
 
   activatePortals(player) {
     const half = player.mini ? 10 : 16;
-    for (const object of this.level.objects) {
-      if (object.type !== 'portal' || this.activated.has(`portal:${object._key}`)) continue;
+    for (const object of this.objects) {
+      const key = `portal:${object._key}:${player === this.player2 ? 2 : 1}`;
+      if (object.active === false || object.type !== 'portal') continue;
+      const routed = this.routedPlayers(object, player);
+      if (!routed.includes(player)) continue;
       const width = object.w || 32;
-      // Crossing the vertical portal field works in either direction for platformer levels.
-      if (player.x + half < object.x || player.x - half > object.x + width) continue;
       const y = object.y ?? 120;
+      const touching = (current) => {
+        const radius = current.mini ? 10 : 16;
+        return current.x + radius >= object.x && current.x - radius <= object.x + width && current.y + radius >= y - 24 && current.y - radius <= y + (object.h || 320) + 24;
+      };
+      if (!touching(player)) {
+        if (object.once === false) {
+          this.activated.delete(key);
+          if (![this.player, this.player2].filter(Boolean).some(touching)) this.activated.delete(`pair:${object._key}`);
+        }
+        continue;
+      }
+      if (this.activated.has(key)) continue;
       // The visible ring sits above the floor; its field includes a small generous fringe.
-      if (player.y + half < y - 24 || player.y - half > y + (object.h || 320) + 24) continue;
-      this.activated.add(`portal:${object._key}`);
+      for (const current of routed) this.activated.add(`portal:${object._key}:${current === this.player2 ? 2 : 1}`);
       const value = String(object.value || 'cube');
-      if (value === 'dual') {
-        this.dual = !this.dual;
-        this.player2 = this.dual ? { ...player, y: FLOOR + CEILING - player.y, prevY: FLOOR + CEILING - player.y, gravity: -player.gravity, vy: -player.vy } : null;
+      if (value === 'dual' || value.startsWith('dual:')) {
+        // Pair-changing effects run once globally, even when both icons enter together.
+        if (this.activated.has(`pair:${object._key}`)) continue;
+        this.activated.add(`pair:${object._key}`);
+        this.setDual(value === 'dual' ? !this.dual : value === 'dual:on');
+      } else if (value.startsWith('mirror:')) {
+        this.mirrored = value === 'mirror:on';
       } else {
-        for (const current of this.dual && this.player2 ? [player, this.player2] : [player]) {
-          if (GAME_MODES.includes(value)) {
-            current.mode = value;
+        for (const current of routed) {
+          if (GAME_MODES.includes(value) || value === 'jetpack') {
+            current.mode = value === 'jetpack' ? 'ship' : value;
+            current.jetpack = this.state.platformer && current.mode === 'ship';
             current.vy = 0;
             current.rotation = 0;
             current.cooldown = 0.12;
@@ -556,15 +818,24 @@ export class GameEngine {
             current.mini = value === 'mini';
             const newHalf = current.mini ? 10 : 16;
             if (current.grounded) current.y += (oldHalf - newHalf) * current.gravity;
-          } else if (value === 'gravity') {
-            current.gravity *= -1;
+          } else if (value === 'gravity' || value.startsWith('gravity:')) {
+            const gravity = value.split(':')[1] || 'toggle';
+            current.gravity = gravity === 'normal' ? 1 : gravity === 'reverse' ? -1 : -current.gravity;
             current.grounded = false;
             current.vy *= 0.5;
+          } else if (value.startsWith('direction:')) {
+            const direction = value.split(':')[1];
+            current.direction = direction === 'left' ? -1 : direction === 'right' ? 1 : -(current.direction || 1);
+          } else if (value === 'teleport') {
+            this.teleportPlayer(current, object);
           }
         }
         if (value.startsWith('speed:')) {
-          const requested = Number(value.slice(6));
-          if (Number.isFinite(requested) && requested > 0) this.speed = clamp(requested, 100, 900);
+          const requested = SPEED_TIERS[value.slice(6)] || Number(value.slice(6));
+          if (Number.isFinite(requested) && requested > 0) {
+            for (const current of routed) current.speed = clamp(requested, 100, 900);
+            this.speed = this.player.speed;
+          }
         }
       }
       this.burst(object.x + width / 2, player.y, this.portalColor(value), 16);
@@ -573,8 +844,8 @@ export class GameEngine {
   }
 
   collectCoins() {
-    for (const object of this.level.objects) {
-      if (object.type !== 'coin' || this.collected.has(object._key)) continue;
+    for (const object of this.objects) {
+      if (object.active === false || object.type !== 'coin' || this.collected.has(object._key)) continue;
       for (const player of this.dual && this.player2 ? [this.player, this.player2] : [this.player]) {
         if (Math.hypot(player.x - object.x, player.y - object.y) < (player.mini ? 10 : 16) + (object.w || 28) / 2) {
           this.collected.add(object._key);
@@ -590,8 +861,8 @@ export class GameEngine {
     const players = this.dual && this.player2 ? [this.player, this.player2] : [this.player];
     for (const player of players) {
       if (!player.grounded && Math.abs(player.vy) > 150) return false;
-      for (const object of this.level.objects) {
-        if (object.type !== 'spike' && object.type !== 'block') continue;
+      for (const object of this.objects) {
+        if (object.active === false || !['spike', 'block', 'slope', 'saw'].includes(object.type)) continue;
         if (object.x > player.x - 24 && object.x < player.x + 120 && Math.abs(object.y - player.y) < 95) return false;
       }
     }
@@ -609,6 +880,10 @@ export class GameEngine {
     this.state.mini = this.player.mini;
     this.state.gravity = this.player.gravity;
     this.state.speed = this.speed;
+    this.state.direction = this.player.direction || 1;
+    this.state.mirrored = this.mirrored;
+    this.state.jetpack = this.state.platformer && this.player.mode === 'ship';
+    this.state.counters = this.runtime?.counters instanceof Map ? Object.fromEntries(this.runtime.counters) : { ...(this.runtime?.counters || {}) };
     this.state.player = this.player;
     this.state.player2 = this.player2;
   }
@@ -641,7 +916,7 @@ export class GameEngine {
     this.emit();
     if (!this.finishReported) {
       this.finishReported = true;
-      this.onFinish({ complete: true, practice: this.state.practice, progress: 100, attempts: this.state.attempts, coins: this.state.coins, coinIds: [...this.collected], time: this.state.time, playTime: this.state.playTime, jumps: this.state.jumps, deaths: this.state.deaths, levelId: this.level.id, platformer: this.state.platformer });
+      this.onFinish({ complete: true, practice: this.state.practice, testMode: this.testMode, progress: 100, attempts: this.state.attempts, coins: this.state.coins, coinIds: [...this.collected], time: this.state.time, playTime: this.state.playTime, jumps: this.state.jumps, deaths: this.state.deaths, levelId: this.level.id, platformer: this.state.platformer });
     }
   }
 
@@ -676,7 +951,7 @@ export class GameEngine {
   }
 
   portalColor(value) {
-    return { cube: '#b8ff65', ship: '#ff75d5', ball: '#ffad67', ufo: '#ffe266', wave: '#61e8ff', robot: '#b391ff', spider: '#ff6aab', swing: '#6dffcf', mini: '#ff75d5', normal: '#b8ff65', gravity: '#ffe266', dual: '#ffad67' }[value] || '#61e8ff';
+    return { cube: '#b8ff65', ship: '#ff75d5', jetpack: '#ff75d5', ball: '#ffad67', ufo: '#ffe266', wave: '#61e8ff', robot: '#b391ff', spider: '#ff6aab', swing: '#6dffcf', mini: '#ff75d5', normal: '#b8ff65', gravity: '#ffe266', dual: '#ffad67' }[value] || (String(value).startsWith('gravity:') ? '#ffe266' : String(value).startsWith('dual:') ? '#ffad67' : '#61e8ff');
   }
 
   render() {
@@ -687,7 +962,14 @@ export class GameEngine {
     this.drawBackground(ctx);
     if (!this.level) return;
     ctx.save();
-    ctx.translate(-this.camera, 0);
+    if (this.mirrored) { ctx.translate(WIDTH, 0); ctx.scale(-1, 1); }
+    const camera = this.runtime?.camera || {};
+    const zoom = clamp(Number(camera.zoom) || 1, 0.2, 3);
+    ctx.translate(WIDTH / 2, HEIGHT / 2);
+    ctx.rotate((Number(camera.rotation) || 0) * Math.PI / 180);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-WIDTH / 2 - this.camera, -HEIGHT / 2 - this.cameraY);
+    this.drawWorldGround(ctx);
     for (const checkpoint of this.checkpoints) {
       if (checkpoint.player.x < this.camera - 30 || checkpoint.player.x > this.camera + WIDTH + 30) continue;
       ctx.strokeStyle = 'rgba(114,255,181,.5)';
@@ -701,8 +983,9 @@ export class GameEngine {
       this.path(ctx, [[checkpoint.player.x, CEILING + 12], [checkpoint.player.x + 16, CEILING + 20], [checkpoint.player.x, CEILING + 28]], '#79ffb5');
     }
     this.drawFinish(ctx);
-    for (const object of this.level.objects) {
-      if (object.x > this.camera + WIDTH + 100 || object.x + (object.w || 60) < this.camera - 100) continue;
+    for (const object of [...this.objects].sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0))) {
+      const radius = object.type === 'saw' ? Number(object.radius) || (object.w || 48) / 2 : 0;
+      if (object.x - radius > this.camera + WIDTH / zoom + WIDTH || object.x + (radius || object.w || 60) < this.camera - WIDTH / zoom) continue;
       this.drawObject(ctx, object);
     }
     for (let index = 0; index < this.trail.length; index++) {
@@ -751,11 +1034,11 @@ export class GameEngine {
   }
 
   drawBackground(ctx) {
-    const color = this.level?.color || '#8467e9';
+    const color = this.runtime?.backgroundColor || this.level?.color || '#2474de';
     const gradient = ctx.createLinearGradient(0, 0, 0, HEIGHT);
-    gradient.addColorStop(0, '#0d122b');
-    gradient.addColorStop(0.64, '#172447');
-    gradient.addColorStop(1, '#0b1127');
+    gradient.addColorStop(0, shade(color, 0.64));
+    gradient.addColorStop(0.64, color);
+    gradient.addColorStop(1, shade(color, 0.8));
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
     const glow = ctx.createRadialGradient(560, 200, 30, 560, 200, 520);
@@ -764,50 +1047,53 @@ export class GameEngine {
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
     const camera = this.camera || 0;
-    // Stable, deterministic scenery; its movement is slower than the game world.
+    // Inset rectangular scenery slides more slowly than the foreground.
     for (let layer = 0; layer < 2; layer++) {
       const scale = layer ? 0.22 : 0.1;
       const offset = (camera * scale) % 230;
-      ctx.strokeStyle = rgba(color, layer ? 0.14 : 0.08);
-      ctx.lineWidth = layer ? 2 : 1;
+      ctx.strokeStyle = rgba('#000000', layer ? 0.17 : 0.12);
+      ctx.lineWidth = 2;
       for (let index = -1; index < 6; index++) {
         const x = index * 230 - offset;
         const y = 132 + ((index + 20) % 3) * 58 + layer * 26;
-        const size = layer ? 82 : 132;
-        ctx.save();
-        ctx.translate(x + 50, y);
-        ctx.rotate(Math.PI / 4);
-        ctx.strokeRect(-size / 2, -size / 2, size, size);
-        ctx.strokeRect(-size / 3, -size / 3, size * 2 / 3, size * 2 / 3);
-        ctx.restore();
+        const size = layer ? 98 : 168;
+        ctx.fillStyle = rgba('#000000', layer ? 0.07 : 0.035);
+        ctx.fillRect(x, y - 40, size, size * 0.9);
+        ctx.strokeRect(x, y - 40, size, size * 0.9);
+        ctx.strokeRect(x + 9, y - 31, size - 18, size * 0.9 - 18);
       }
     }
-    ctx.fillStyle = '#0b1225';
-    ctx.fillRect(0, FLOOR, WIDTH, HEIGHT - FLOOR);
-    ctx.strokeStyle = rgba(color, 0.17);
-    ctx.lineWidth = 1;
-    const offset = camera % 48;
-    for (let x = -offset; x < WIDTH; x += 48) {
+  }
+
+  drawWorldGround(ctx) {
+    const color = this.runtime?.groundColor || this.level?.color || '#8467e9';
+    const left = this.camera - WIDTH * 3;
+    const width = WIDTH * 7;
+    ctx.fillStyle = shade(color, 0.45);
+    ctx.fillRect(left, FLOOR, width, HEIGHT + 1800);
+    ctx.strokeStyle = rgba('#ffffff', 0.2);
+    ctx.lineWidth = 2;
+    for (let x = Math.floor(left / 64) * 64; x < left + width; x += 64) {
       ctx.beginPath();
       ctx.moveTo(x, FLOOR);
-      ctx.lineTo(x - 40, HEIGHT);
+      ctx.lineTo(x, HEIGHT + 900);
       ctx.stroke();
     }
-    for (const y of [498, 526, 568]) {
+    for (const y of [FLOOR + 60, FLOOR + 120, FLOOR + 180]) {
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(WIDTH, y);
+      ctx.moveTo(left, y);
+      ctx.lineTo(left + width, y);
       ctx.stroke();
     }
     ctx.fillStyle = rgba(color, 0.14);
-    ctx.fillRect(0, FLOOR + 2, WIDTH, 8);
-    ctx.fillStyle = '#8fa1d1';
-    ctx.fillRect(0, FLOOR, WIDTH, 2);
+    ctx.fillRect(left, FLOOR + 2, width, 8);
+    ctx.fillStyle = '#f0f8ff';
+    ctx.fillRect(left, FLOOR, width, 3);
     if (this.player && (this.player.gravity < 0 || ['ship', 'wave', 'ball', 'spider', 'swing'].includes(this.player.mode) || this.dual)) {
       ctx.fillStyle = rgba(color, 0.13);
-      ctx.fillRect(0, CEILING - 9, WIDTH, 9);
+      ctx.fillRect(left, CEILING - 9, width, 9);
       ctx.fillStyle = '#6c7fa8';
-      ctx.fillRect(0, CEILING - 2, WIDTH, 2);
+      ctx.fillRect(left, CEILING - 2, width, 2);
     }
   }
 
@@ -827,20 +1113,35 @@ export class GameEngine {
   }
 
   drawObject(ctx, object) {
+    if (object.active === false || object.visible === false) return;
+    if (['trigger', 'startpos'].includes(object.type) && !this.testMode) return;
+    ctx.save();
+    ctx.globalAlpha *= clamp(object.opacity === undefined ? 1 : Number(object.opacity), 0, 1);
+    if (object.rotation) {
+      const centered = ['coin', 'orb', 'saw', 'startpos'].includes(object.type);
+      const cx = object.x + (centered ? 0 : (object.w || 40) / 2);
+      const cy = object.y + (centered ? 0 : (object.h || 40) / 2);
+      ctx.translate(cx, cy); ctx.rotate(Number(object.rotation) * Math.PI / 180); ctx.translate(-cx, -cy);
+    }
+    this.drawObjectShape(ctx, { ...object, rotation: 0 });
+    ctx.restore();
+  }
+
+  drawObjectShape(ctx, object) {
     const x = object.x;
     const y = object.y;
     if (object.type === 'spike') {
       const points = spikePoints(object);
-      this.path(ctx, points, '#e8efff', '#b8c8ef', 2);
+      this.path(ctx, points, object.color || '#080e17', '#f5fdff', 2.5);
       const center = [points.reduce((sum, point) => sum + point[0], 0) / 3, points.reduce((sum, point) => sum + point[1], 0) / 3];
       const inner = points.map(([px, py]) => [lerp(px, center[0], 0.34), lerp(py, center[1], 0.34)]);
-      this.path(ctx, inner, '#172342', null);
+      this.path(ctx, inner, null, rgba('#ffffff', 0.3), 1);
     } else if (object.type === 'block') {
       const w = object.w || 40;
       const h = object.h || 40;
-      ctx.fillStyle = '#1c2c50';
+      ctx.fillStyle = object.color || '#080e17';
       ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = '#7d94c1';
+      ctx.strokeStyle = '#f5fdff';
       ctx.lineWidth = 2;
       ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
       ctx.strokeStyle = 'rgba(133,157,204,.22)';
@@ -855,6 +1156,47 @@ export class GameEngine {
           ctx.stroke();
         }
       }
+    } else if (object.type === 'slope') {
+      const w = object.w || 96; const h = object.h || 96;
+      const points = object.value === 'down' ? [[x, y], [x + w, y + h], [x, y + h]] : [[x, y + h], [x + w, y], [x + w, y + h]];
+      this.path(ctx, points, object.color || '#080e17', '#f5fdff', 2);
+      ctx.strokeStyle = rgba(this.level.color, 0.65); ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(points[0][0], points[0][1]); ctx.lineTo(points[1][0], points[1][1]); ctx.stroke();
+    } else if (object.type === 'saw') {
+      const radius = Number(object.radius) || (object.w || 48) / 2;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(this.settings.reducedMotion ? 0 : this.state.time * 2);
+      const points = Array.from({ length: 32 }, (_, index) => {
+        const angle = index / 32 * TAU; const r = radius * (index % 2 ? 0.74 : 1);
+        return [Math.cos(angle) * r, Math.sin(angle) * r];
+      });
+      this.path(ctx, points, object.color || '#e8efff', '#9caed6', 2);
+      ctx.fillStyle = '#23375a'; ctx.beginPath(); ctx.arc(0, 0, radius * 0.45, 0, TAU); ctx.fill();
+      ctx.fillStyle = object.color || '#ff6a91'; ctx.beginPath(); ctx.arc(0, 0, radius * 0.16, 0, TAU); ctx.fill();
+      ctx.restore();
+    } else if (object.type === 'checkpoint') {
+      const reached = this.activated.has(`checkpoint:${object._key}`);
+      const color = object.color || (reached ? '#b8ff65' : '#61e8ff');
+      ctx.strokeStyle = color; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(x + 8, y + (object.h || 80)); ctx.lineTo(x + 8, y); ctx.stroke();
+      this.path(ctx, [[x + 8, y], [x + 38, y + 12], [x + 8, y + 26]], color, '#102440', 2);
+      ctx.fillStyle = rgba(color, 0.12); ctx.fillRect(x, y, object.w || 32, object.h || 80);
+    } else if (object.type === 'startpos') {
+      ctx.strokeStyle = '#79ffb5'; ctx.lineWidth = 2; ctx.setLineDash([5, 4]); ctx.strokeRect(x - 17, y - 17, 34, 34); ctx.setLineDash([]);
+      ctx.fillStyle = '#79ffb5'; ctx.font = '700 10px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('TEST START', x, y - 26);
+    } else if (object.type === 'trigger') {
+      const color = object.color || '#b391ff';
+      this.path(ctx, [[x, y + 16], [x + 16, y], [x + 32, y + 16], [x + 16, y + 32]], rgba(color, 0.15), color, 1);
+      ctx.fillStyle = color; ctx.font = '600 9px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(String(object.action || object.value || 'TRIGGER').toUpperCase(), x + 16, y + 46);
+    } else if (object.type === 'text') {
+      ctx.fillStyle = object.color || '#d7e5ff'; ctx.textAlign = 'left'; ctx.font = `700 ${clamp(Number(object.fontSize) || 24, 8, 128)}px system-ui, sans-serif`;
+      ctx.fillText(String(object.text || object.value || ''), x, y + (Number(object.fontSize) || 24));
+    } else if (object.type === 'decoration') {
+      const w = object.w || 48; const h = object.h || 48; const color = object.color || this.level.color || '#9060ff';
+      const shape = object.shape || object.value || 'diamond';
+      if (shape === 'circle') { ctx.fillStyle = rgba(color, 0.25); ctx.strokeStyle = color; ctx.beginPath(); ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, TAU); ctx.fill(); ctx.stroke(); }
+      else if (shape === 'line') { ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, y + h / 2); ctx.lineTo(x + w, y + h / 2); ctx.stroke(); }
+      else if (shape === 'block' || shape === 'square') { ctx.fillStyle = rgba(color, 0.25); ctx.fillRect(x, y, w, h); ctx.strokeStyle = color; ctx.strokeRect(x, y, w, h); }
+      else this.path(ctx, [[x + w / 2, y], [x + w, y + h / 2], [x + w / 2, y + h], [x, y + h / 2]], rgba(color, 0.25), color, 1);
     } else if (object.type === 'coin') {
       if (this.collected.has(object._key)) return;
       const radius = (object.w || 28) / 2;
@@ -878,14 +1220,14 @@ export class GameEngine {
       ctx.restore();
     } else if (object.type === 'pad') {
       const w = object.w || 36;
-      const color = this.impulseColor(object.value);
+      const color = object.color || this.impulseColor(object.value);
       ctx.fillStyle = rgba(color, 0.2);
       ctx.fillRect(x - 3, y - 14, w + 6, 14);
       ctx.fillStyle = color;
       ctx.fillRect(x, y - 4, w, 6);
       this.path(ctx, [[x + 6, y - 8], [x + w / 2, y - 18], [x + w - 6, y - 8]], null, color, 2);
     } else if (object.type === 'orb') {
-      const color = this.impulseColor(object.value);
+      const color = object.color || this.impulseColor(object.value);
       const radius = (object.w || 36) / 2;
       const pulse = this.settings.reducedMotion ? 0 : Math.sin(this.state.time * 7) * 3;
       ctx.fillStyle = rgba(color, 0.13);
@@ -907,12 +1249,17 @@ export class GameEngine {
       ctx.beginPath();
       ctx.arc(x - 3, y - 4, 3, 0, TAU);
       ctx.fill();
+      const symbol = { dash: '➜', 'gravity-dash': '⇄', spider: '↕', teleport: '◎', trigger: '◆' }[object.value];
+      if (symbol) {
+        ctx.save(); ctx.translate(x, y); ctx.rotate((Number(object.angle) || 0) * Math.PI / 180);
+        ctx.fillStyle = '#101522'; ctx.font = `900 ${Math.round(radius * 1.1)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(symbol, 0, 0); ctx.restore();
+      }
     } else if (object.type === 'portal') {
-      const color = this.portalColor(object.value);
+      const color = object.color || this.portalColor(object.value);
       const w = object.w || 32;
       const h = object.h || 320;
       const top = object.y ?? 120;
-      const active = this.activated.has(`portal:${object._key}`);
+      const active = this.activated.has(`portal:${object._key}:1`) || this.activated.has(`portal:${object._key}:2`);
       ctx.save();
       ctx.globalAlpha = active ? 0.5 : 1;
       ctx.fillStyle = rgba(color, 0.08);
@@ -928,6 +1275,10 @@ export class GameEngine {
       ctx.ellipse(x + w / 2, top + h / 2, w / 2 + 11, h / 2 + 5, 0, 0, TAU);
       ctx.stroke();
       ctx.fillStyle = color;
+      const glyph = { cube: '■', ship: '➤', jetpack: '↑', ball: '◉', ufo: '⌒', wave: '▷', robot: '⊓', spider: '⋈', swing: '↕', mini: '◦', normal: '●', teleport: '◎' }[object.value] || (String(object.value).startsWith('gravity') ? '⇅' : String(object.value).startsWith('dual') ? 'Ⅱ' : String(object.value).startsWith('mirror') ? '⇄' : '»');
+      ctx.fillStyle = '#101522'; ctx.strokeStyle = color; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x + w / 2, top + h / 2, 12, 0, TAU); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.font = '900 13px system-ui, sans-serif'; ctx.fillText(glyph, x + w / 2, top + h / 2 + 4);
       for (let index = 0; index < 8; index++) {
         const pointY = top + 20 + ((index * 39 + this.state.time * 30) % Math.max(1, h - 35));
         ctx.fillRect(x + w / 2 - 2, pointY, 4, 4);
@@ -960,41 +1311,21 @@ export class GameEngine {
       ctx.fillRect(4, y, 2, 2);
     };
     if (player.mode === 'cube') {
-      ctx.fillStyle = primary;
-      ctx.strokeStyle = dark;
-      ctx.lineWidth = 3;
-      ctx.fillRect(-16, -16, 32, 32);
-      ctx.strokeRect(-16, -16, 32, 32);
-      ctx.strokeStyle = rgba('#ffffff', 0.6);
-      ctx.lineWidth = 1;
-      ctx.strokeRect(-12, -12, 24, 24);
-      const variant = clamp(Math.floor(Number(this.cosmetics.icon) || 0), 0, 11);
-      ctx.strokeStyle = secondaryColor;
-      ctx.strokeRect(-14, -14, 28, 28);
-      if (variant % 3 === 2) {
-        this.path(ctx, [[-11, -10], [-3, -6], [-5, -1], [-11, -4]], dark, null);
-        this.path(ctx, [[11, -10], [3, -6], [5, -1], [11, -4]], dark, null);
-      } else {
-        ctx.fillStyle = dark;
-        ctx.fillRect(-10, -9, 6, 7);
-        ctx.fillRect(4, -9, 6, 7);
-        if (variant % 3 === 1) {
-          ctx.fillStyle = light;
-          ctx.fillRect(-9, -8, 3, 3);
-          ctx.fillRect(5, -8, 3, 3);
-        }
-      }
-      ctx.fillStyle = dark;
-      if (variant % 4 === 0) ctx.fillRect(-10, 5, 20, 6);
-      else if (variant % 4 === 1) this.path(ctx, [[-10, 5], [-5, 5], [-5, 8], [5, 8], [5, 5], [10, 5], [10, 12], [-10, 12]], dark, null);
-      else if (variant % 4 === 2) this.path(ctx, [[-10, 10], [-5, 4], [0, 10], [5, 4], [10, 10]], dark, null);
-      else ctx.fillRect(-8, 5, 16, 4);
+      drawCubeIcon(ctx, this.cosmetics.icon, primary, secondaryColor, 32);
     } else if (player.mode === 'ship') {
+      if (this.state.platformer) {
+        ctx.fillStyle = secondaryColor; ctx.strokeStyle = dark; ctx.lineWidth = 2;
+        ctx.fillRect(-18, -4, 8, 18); ctx.strokeRect(-18, -4, 8, 18);
+        drawCubeIcon(ctx, this.cosmetics.icon, primary, secondaryColor, 25);
+        ctx.strokeStyle = '#c7eeff'; ctx.beginPath(); ctx.arc(0, -4, 16, Math.PI, TAU); ctx.stroke();
+        if (this.input.held) this.path(ctx, [[-18, 13], [-14, 26 + Math.sin(this.state.time * 30) * 4], [-10, 13]], '#ffe266', null);
+      } else {
       this.path(ctx, [[-20, 6], [-10, -10], [10, -10], [22, 4], [7, 13], [-13, 13]], primary, dark, 3);
       this.path(ctx, [[-7, -8], [7, -8], [12, 0], [-9, 0]], secondaryColor, dark, 2);
       ctx.fillStyle = light;
       ctx.fillRect(-3, -6, 5, 4);
       if (this.input.held) this.path(ctx, [[-18, 2], [-31 - Math.sin(this.state.time * 30) * 5, 6], [-18, 10]], '#ffe266', null);
+      }
     } else if (player.mode === 'ball') {
       const points = [];
       for (let index = 0; index < 24; index++) {
@@ -1140,6 +1471,7 @@ export class GameEngine {
     this.listeners.forEach((remove) => remove());
     this.listeners = [];
     this.audio?.stopMusic?.();
+    this.canvasPointerId = null;
     this.release();
     this.state.status = 'idle';
   }

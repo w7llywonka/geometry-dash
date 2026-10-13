@@ -9,12 +9,33 @@ import { LEVELS, normalizeLevel } from './levels.js';
  */
 export const STORAGE_KEY = 'geometry-dash-offline-profile-v1';
 
+// This is this game's original offline economy, not the commercial game's
+// reward table. All rewards are deterministic; there are no timed lotteries.
+export const ECONOMY_RULES = Object.freeze({ orbsPerRating: 100, orbsPerKey: 500, description: 'Original offline rewards: campaign clears earn orbs; achievements earn diamonds.' });
+const FREE_COLORS = ['#b8ff65', '#9b7bff', '#ffb35c', '#ff638b', '#5ddcff', '#fff275', '#f7f3ff', '#ed71ff', '#63ffce', '#ff775d'];
+export const SHOP_ITEMS = [
+  ...['Comet', 'Beacon', 'Prism', 'Switch', 'Orbit', 'Signal', 'Crown', 'Apex', 'Flux', 'Nova', 'Circuit', 'Zenith'].map((name, index) => ({
+    id: `icon-${index + 12}`, name: `${name} icon`, description: 'An original geometric player design.',
+    cost: { orbs: 200 + index * 50, ...(index >= 8 ? { diamonds: 10 } : {}), ...(index >= 10 ? { keys: 1 } : {}) },
+    reward: { type: 'icon', value: index + 12 },
+  })),
+  { id: 'trail-rainbow', name: 'Spectrum trail', description: 'Leave a trail of shifting colors.', cost: { orbs: 650, diamonds: 25, keys: 1 }, reward: { type: 'trail', value: 'rainbow' } },
+  { id: 'trail-pulse', name: 'Pulse trail', description: 'A luminous pulse follows your player.', cost: { orbs: 850, diamonds: 35, keys: 2 }, reward: { type: 'trail', value: 'pulse' } },
+  ...['#ff4d6d', '#38bdf8', '#a78bfa', '#fbbf24', '#2dd4bf', '#f472b6'].map((value, index) => ({
+    id: `color-${index}`, name: ['Crimson', 'Sky', 'Lilac', 'Gold', 'Lagoon', 'Rose'][index], description: 'Unlock this color for either player color.',
+    cost: { orbs: 100, diamonds: 5, ...(index >= 4 ? { keys: 1 } : {}) }, reward: { type: 'color', value },
+  })),
+].map(item => Object.freeze({ ...item, cost: Object.freeze(item.cost), reward: Object.freeze(item.reward) }));
+const SHOP_BY_ID = new Map(SHOP_ITEMS.map(item => [item.id, item]));
+
 const DIFFICULTY_STARS = { easy: 2, normal: 3, hard: 5, harder: 7, insane: 9, demon: 10 };
 const CAMPAIGN_LEVELS = new Map(LEVELS.map(level => [level.id, level]));
 const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const COLORS = /^#[0-9a-f]{6}$/i;
 const MAX_IMPORT_SIZE = 8 * 1024 * 1024;
 const emptyProgress = () => ({ best: 0, practiceBest: 0, completed: false, coins: 0, attempts: 0, bestTime: null });
+const emptyEconomy = () => ({ orbs: 0, diamonds: 0, keys: 0, earnedOrbs: 0, earnedDiamonds: 0, earnedKeys: 0, levelRewards: [], achievementRewards: [], purchases: [] });
+const emptyInventory = () => ({ icons: Array.from({ length: 12 }, (_, i) => i), trails: ['spark', 'line', 'none'], colors: [...FREE_COLORS] });
 const defaults = () => ({
   progress: {},
   settings: { music: true, sfx: true, autoCheckpoint: true, reducedMotion: false, volume: 0.5 },
@@ -22,6 +43,8 @@ const defaults = () => ({
   customLevels: [],
   stats: { totalAttempts: 0, jumps: 0, deaths: 0, playTime: 0 },
   achievements: [],
+  economy: emptyEconomy(),
+  inventory: emptyInventory(),
 });
 const number = (value, fallback = 0, max = Number.MAX_SAFE_INTEGER) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(max, value)) : fallback;
@@ -41,7 +64,11 @@ export const ACHIEVEMENTS = [
   { id: 'platformer-clear', title: 'Room to explore', description: 'Complete a campaign platformer level.', icon: '▣', test: data => campaignProgress(data).some(item => item.completed && item.mode === 'platformer') },
   { id: 'level-maker', title: 'Make your own rhythm', description: 'Save a level in the editor.', icon: '✎', test: data => data.customLevels.length > 0 },
   { id: 'thousand-jumps', title: 'Air time', description: 'Jump 1,000 times.', icon: '↑', test: data => data.stats.jumps >= 1000 },
+  { id: 'orb-spark', title: 'Stored energy', description: 'Earn 500 campaign orbs.', icon: '◉', test: data => data.economy.earnedOrbs >= 500 },
+  { id: 'moon-traveler', title: 'Above the horizon', description: 'Earn 8 moons from campaign platformers.', icon: '☾', test: data => campaignProgress(data).reduce((sum, item) => sum + (item.completed ? item.moons ?? 0 : 0), 0) >= 8 },
+  { id: 'first-purchase', title: 'Personal signal', description: 'Buy your first local shop cosmetic.', icon: '✦', test: data => data.economy.purchases.length > 0 },
 ];
+const ACHIEVEMENT_DIAMONDS = { 'first-clear': 15, 'three-clear': 30, 'eight-clear': 60, 'first-coin': 10, 'coin-hunter': 25, 'practice-clear': 10, 'hundred-attempts': 10, 'platformer-clear': 30, 'level-maker': 10, 'thousand-jumps': 20, 'orb-spark': 25, 'moon-traveler': 25, 'first-purchase': 10 };
 const ACHIEVEMENT_IDS = new Set(ACHIEVEMENTS.map(item => item.id));
 
 // Levels are plain JSON only. Reject dangerous keys anywhere, excessive depth,
@@ -104,6 +131,7 @@ function cleanProgress(source) {
       bestTime: completed && number(value.bestTime) > 0 ? number(value.bestTime) : null,
       custom: !campaign,
       stars: campaign && !campaign.platformer ? DIFFICULTY_STARS[String(campaign.difficulty).toLowerCase()] ?? 3 : 0,
+      moons: campaign?.platformer ? DIFFICULTY_STARS[String(campaign.difficulty).toLowerCase()] ?? 3 : 0,
       mode: campaign ? (campaign.platformer ? 'platformer' : 'classic') : value.mode === 'platformer' ? 'platformer' : 'classic',
       coinIds: Array.isArray(value.coinIds) ? [...new Set(value.coinIds.filter(id => typeof id === 'string' || Number.isInteger(id)))].slice(0, 3) : [],
     };
@@ -136,7 +164,88 @@ function cleanProfile(source) {
     for (const key of ['totalAttempts', 'jumps', 'deaths']) result.stats[key] = Math.floor(result.stats[key]);
   }
   if (Array.isArray(source.achievements)) result.achievements = [...new Set(source.achievements.filter(id => ACHIEVEMENT_IDS.has(id)))];
+  result.economy = cleanEconomy(source.economy);
+  result.inventory = cleanInventory(source.inventory);
+  // An older profile had no unlock restrictions. Grandfather any equipped
+  // legacy cosmetic, including previously selected extended icons/trails.
+  if (!isObject(source.inventory)) {
+    unlockReward(result.inventory, { type: 'icon', value: result.cosmetics.icon });
+    unlockReward(result.inventory, { type: 'trail', value: result.cosmetics.trail });
+    unlockReward(result.inventory, { type: 'color', value: result.cosmetics.primary });
+    unlockReward(result.inventory, { type: 'color', value: result.cosmetics.secondary });
+  }
+  for (const id of result.economy.purchases) unlockReward(result.inventory, SHOP_BY_ID.get(id).reward);
+  for (const [id, progress] of Object.entries(result.progress)) if (!progress.custom && progress.completed) creditLevel(result, id);
+  for (const id of result.achievements) creditAchievement(result, id);
+  if (!isOwned(result.inventory, 'icon', result.cosmetics.icon)) result.cosmetics.icon = 0;
+  if (!isOwned(result.inventory, 'trail', result.cosmetics.trail)) result.cosmetics.trail = 'spark';
+  for (const key of ['primary', 'secondary']) if (!isOwned(result.inventory, 'color', result.cosmetics[key])) result.cosmetics[key] = defaults().cosmetics[key];
   return result;
+}
+
+function cleanEconomy(source) {
+  const result = emptyEconomy();
+  if (!isObject(source)) return result;
+  for (const key of ['orbs', 'diamonds', 'keys', 'earnedOrbs', 'earnedDiamonds', 'earnedKeys']) result[key] = integer(source[key]);
+  for (const [key, allowed] of [['levelRewards', CAMPAIGN_LEVELS], ['achievementRewards', ACHIEVEMENT_IDS], ['purchases', SHOP_BY_ID]]) {
+    if (Array.isArray(source[key])) result[key] = [...new Set(source[key].filter(id => allowed.has(id)))];
+  }
+  // Lifetime amounts cannot fall below available balances. This also keeps
+  // legacy/partial imports well-defined without taking away valid funds.
+  result.earnedOrbs = Math.max(result.earnedOrbs, result.orbs);
+  result.earnedDiamonds = Math.max(result.earnedDiamonds, result.diamonds);
+  result.earnedKeys = Math.max(result.earnedKeys, result.keys);
+  return result;
+}
+
+function cleanInventory(source) {
+  const result = emptyInventory();
+  if (!isObject(source)) return result;
+  if (Array.isArray(source.icons)) result.icons = [...new Set([...result.icons, ...source.icons.filter(value => Number.isInteger(value) && value >= 0 && value < 24)])];
+  if (Array.isArray(source.trails)) result.trails = [...new Set([...result.trails, ...source.trails.filter(value => ['rainbow', 'pulse'].includes(value))])];
+  if (Array.isArray(source.colors)) result.colors = [...new Set([...result.colors, ...source.colors.filter(value => typeof value === 'string' && COLORS.test(value)).map(value => value.toLowerCase())])].slice(0, 100);
+  return result;
+}
+
+function unlockReward(inventory, reward) {
+  const key = { icon: 'icons', trail: 'trails', color: 'colors' }[reward.type];
+  if (key && !inventory[key].includes(reward.value)) inventory[key].push(reward.value);
+}
+
+function isOwned(inventory, kind, value) {
+  const key = { icon: 'icons', icons: 'icons', trail: 'trails', trails: 'trails', color: 'colors', colors: 'colors' }[kind];
+  if (!key) return false;
+  if (key === 'colors') {
+    if (typeof value !== 'string' || !COLORS.test(value)) return false;
+    const color = value.toLowerCase();
+    // Preserve user-chosen custom hex colors; only the additional shop
+    // palette entries are gated. These are cosmetic choices, not credentials.
+    return inventory.colors.includes(color) || !SHOP_ITEMS.some(item => item.reward.type === 'color' && item.reward.value === color);
+  }
+  return inventory[key].includes(value);
+}
+
+function creditLevel(data, id) {
+  const level = CAMPAIGN_LEVELS.get(id);
+  if (!level || data.economy.levelRewards.includes(id)) return 0;
+  const amount = (DIFFICULTY_STARS[String(level.difficulty).toLowerCase()] ?? 3) * ECONOMY_RULES.orbsPerRating;
+  data.economy.levelRewards.push(id);
+  data.economy.orbs += amount;
+  data.economy.earnedOrbs += amount;
+  const earnedKeys = Math.floor(data.economy.earnedOrbs / ECONOMY_RULES.orbsPerKey);
+  const newKeys = Math.max(0, earnedKeys - data.economy.earnedKeys);
+  data.economy.keys += newKeys;
+  data.economy.earnedKeys += newKeys;
+  return amount;
+}
+
+function creditAchievement(data, id) {
+  if (data.economy.achievementRewards.includes(id)) return 0;
+  const amount = ACHIEVEMENT_DIAMONDS[id] ?? 0;
+  data.economy.achievementRewards.push(id);
+  data.economy.diamonds += amount;
+  data.economy.earnedDiamonds += amount;
+  return amount;
 }
 
 function cleanLevel(level) {
@@ -183,7 +292,11 @@ export class Store {
   }
 
   updateCosmetics(patch) {
-    this.data.cosmetics = cleanCosmetics(patch, this.data.cosmetics);
+    const next = cleanCosmetics(patch, this.data.cosmetics);
+    if (!this.isUnlocked('icon', next.icon)) next.icon = this.data.cosmetics.icon;
+    if (!this.isUnlocked('trail', next.trail)) next.trail = this.data.cosmetics.trail;
+    for (const key of ['primary', 'secondary']) if (!this.isUnlocked('color', next[key])) next[key] = this.data.cosmetics[key];
+    this.data.cosmetics = next;
     this.save();
     return this.data.cosmetics;
   }
@@ -213,6 +326,40 @@ export class Store {
     return safeId(id) && Object.hasOwn(this.data.progress, id) ? this.data.progress[id] : emptyProgress();
   }
 
+  isUnlocked(kind, value) {
+    return isOwned(this.data.inventory, kind, value);
+  }
+
+  getShopItems() {
+    return SHOP_ITEMS.map(item => ({
+      ...item,
+      owned: this.isUnlocked(item.reward.type, item.reward.value),
+      affordable: Object.entries(item.cost).every(([currency, cost]) => this.data.economy[currency] >= cost),
+    }));
+  }
+
+  purchase(id) {
+    const item = SHOP_BY_ID.get(id);
+    if (!item) return { success: false, message: 'This shop item does not exist.', item: null };
+    if (this.isUnlocked(item.reward.type, item.reward.value)) return { success: false, message: 'You already own this item.', item };
+    if (!Object.entries(item.cost).every(([currency, cost]) => this.data.economy[currency] >= cost)) {
+      return { success: false, message: 'Earn more rewards to buy this item.', item };
+    }
+    // Commit all deductions, inventory, and achievement rewards together. A
+    // storage write failure rolls the purchase back rather than losing funds.
+    const previous = this.data;
+    this.data = JSON.parse(JSON.stringify(previous));
+    for (const [currency, cost] of Object.entries(item.cost)) this.data.economy[currency] -= cost;
+    this.data.economy.purchases.push(id);
+    unlockReward(this.data.inventory, item.reward);
+    this.checkAchievements();
+    if (!this.save()) {
+      this.data = previous;
+      return { success: false, message: `The purchase was not saved. ${this.storageError}`, item };
+    }
+    return { success: true, message: `${item.name} unlocked.`, item };
+  }
+
   recordRun(level, result = {}) {
     if (!isObject(level) || !safeId(level.id)) throw new Error('A run needs a valid level.');
     const progress = { ...emptyProgress(), ...this.getProgress(level.id) };
@@ -223,8 +370,12 @@ export class Store {
     const campaign = CAMPAIGN_LEVELS.get(level.id);
     if (campaign && level.custom === true) throw new Error('A custom level cannot use a campaign level ID.');
     progress.custom = !campaign;
-    progress.mode = level.platformer === true || level.mode === 'platformer' || level.type === 'platformer' ? 'platformer' : 'classic';
-    progress.stars = progress.custom || progress.mode === 'platformer' ? 0 : integer(level.stars, DIFFICULTY_STARS[String(level.difficulty).toLowerCase()] ?? 3, 10);
+    const platformer = campaign ? campaign.platformer : level.platformer === true || level.mode === 'platformer' || level.type === 'platformer';
+    const rating = DIFFICULTY_STARS[String((campaign ?? level).difficulty).toLowerCase()] ?? 3;
+    progress.stars = progress.custom || platformer ? 0 : rating;
+    progress.moons = !progress.custom && platformer ? rating : 0;
+    progress.mode = platformer ? 'platformer' : 'classic';
+    let orbsAwarded = 0;
     if (practice) {
       progress.practiceBest = Math.max(progress.practiceBest, completed ? 100 : percent);
     } else {
@@ -240,12 +391,13 @@ export class Store {
         }
         const time = number(result.time ?? result.bestTime);
         if (time > 0) progress.bestTime = progress.bestTime === null ? time : Math.min(progress.bestTime, time);
+        if (!progress.custom) orbsAwarded = creditLevel(this.data, level.id);
       }
     }
     this.data.progress[level.id] = progress;
     const unlocked = this.checkAchievements();
     this.save();
-    return { ...progress, unlocked };
+    return { ...progress, unlocked, orbsAwarded };
   }
 
   recordStats(delta = {}) {
@@ -265,6 +417,10 @@ export class Store {
     const campaign = campaignProgress(this.data);
     return {
       stars: campaign.reduce((sum, item) => sum + (item.completed ? item.stars ?? 0 : 0), 0),
+      moons: campaign.reduce((sum, item) => sum + (item.completed ? item.moons ?? 0 : 0), 0),
+      orbs: this.data.economy.orbs,
+      diamonds: this.data.economy.diamonds,
+      keys: this.data.economy.keys,
       coins: campaign.reduce((sum, item) => sum + item.coins, 0),
       completed: campaign.filter(item => item.completed).length,
       attempts: this.data.stats.totalAttempts,
@@ -279,6 +435,7 @@ export class Store {
     for (const item of ACHIEVEMENTS) {
       if (!this.data.achievements.includes(item.id) && item.test(this.data)) {
         this.data.achievements.push(item.id);
+        creditAchievement(this.data, item.id);
         unlocked.push(item);
       }
     }
@@ -287,11 +444,11 @@ export class Store {
 
   getAchievements() {
     this.checkAchievements();
-    return ACHIEVEMENTS.map(({ test, ...item }) => ({ ...item, unlocked: this.data.achievements.includes(item.id) }));
+    return ACHIEVEMENTS.map(({ test, ...item }) => ({ ...item, diamonds: ACHIEVEMENT_DIAMONDS[item.id] ?? 0, unlocked: this.data.achievements.includes(item.id) }));
   }
 
   exportData() {
-    return JSON.stringify({ version: 1, ...this.data }, null, 2);
+    return JSON.stringify({ version: 2, ...this.data }, null, 2);
   }
 
   // Import atomically replaces the profile after validation. The caller should
@@ -301,7 +458,7 @@ export class Store {
     let parsed;
     try { parsed = JSON.parse(text); } catch { throw new Error('The save file is not valid JSON.'); }
     if (!isObject(parsed)) throw new Error('The save file must contain a profile object.');
-    if (parsed.version !== undefined && parsed.version !== 1) throw new Error('This save file uses an unsupported version.');
+    if (parsed.version !== undefined && ![1, 2].includes(parsed.version)) throw new Error('This save file uses an unsupported version.');
     const cleaned = cleanProfile(parsed);
     this.data = cleaned;
     this.checkAchievements();

@@ -1,9 +1,12 @@
 // Original, replaceable offline courses. Positions are in the engine's 960 × 540 world.
-// Coins and orbs use center coordinates; every other object uses its top-left corner.
+// Coins, orbs, saws, and start positions use centers; other objects use top-left coordinates.
 export const MODES = ['cube', 'ship', 'ball', 'ufo', 'wave', 'robot', 'spider', 'swing'];
 export const DIFFICULTIES = ['Easy', 'Normal', 'Hard', 'Harder', 'Insane', 'Demon'];
-export const OBJECT_TYPES = ['spike', 'block', 'coin', 'pad', 'orb', 'portal'];
-export const PORTAL_VALUES = [...MODES, 'mini', 'normal', 'gravity', 'dual', 'speed:220', 'speed:300', 'speed:380', 'speed:460'];
+export const OBJECT_TYPES = ['spike', 'block', 'slope', 'saw', 'coin', 'pad', 'orb', 'portal', 'checkpoint', 'trigger', 'startpos', 'decoration', 'text'];
+export const EFFECT_VALUES = ['yellow', 'pink', 'red', 'blue', 'green', 'black', 'dash', 'gravity-dash', 'spider', 'teleport', 'trigger'];
+export const TRIGGER_ACTIONS = ['move', 'rotate', 'color', 'alpha', 'toggle', 'spawn', 'pickup', 'follow', 'gravity', 'camera', 'sfx', 'stop-sfx', 'end', 'pulse'];
+export const EASING_VALUES = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'bounce', 'elastic'];
+export const PORTAL_VALUES = [...MODES, 'jetpack', 'mini', 'normal', 'gravity', 'gravity:normal', 'gravity:reverse', 'gravity:toggle', 'dual', 'dual:on', 'dual:off', 'mirror:on', 'mirror:off', 'direction:left', 'direction:right', 'direction:toggle', 'speed:slow', 'speed:normal', 'speed:fast', 'speed:faster', 'speed:fastest', 'speed:220', 'speed:300', 'speed:380', 'speed:460', 'teleport'];
 
 const spike = (x, count = 1, y = 448) => Array.from({ length: count }, (_, i) => ({ type: 'spike', x: x + i * 32, y, w: 32, h: 32, ...(y === 80 ? { value: 'down' } : {}) }));
 const block = (x, y = 384, w = 96, h = 480 - y) => ({ type: 'block', x, y, w, h });
@@ -106,6 +109,41 @@ export const LEVELS = [
   ], true),
 ];
 
+// These original courses double as editable examples of the local object/trigger system.
+export const LAB_LEVELS = [
+  course('lab-signal-foundry', 'Signal Foundry', 'Groups, motion, colors, and a little backstage magic.', 'Normal', '#ac91ff', 128, 285, 4500, [
+    { type: 'text', x: 650, y: 200, text: 'THE SIGNAL IS ALIVE', w: 300, h: 40, color: '#c9a7ff', fontSize: 24, groups: [10] },
+    { type: 'decoration', x: 1030, y: 160, w: 64, h: 64, value: 'diamond', groups: [10], color: '#a991ff' },
+    { type: 'trigger', x: 680, y: 400, action: 'color', colorTarget: 'background', color: '#251844', duration: 1.5 },
+    { type: 'trigger', x: 900, y: 400, action: 'move', targetGroup: 10, moveX: 160, moveY: 0, duration: 2, easing: 'ease-in-out' },
+    spike(1180), coin(1240, 335), { type: 'trigger', x: 1500, y: 400, action: 'rotate', targetGroup: 10, rotation: 180, duration: 2 },
+    { type: 'startpos', x: 1650, y: 464, mode: 'cube', gravity: 1, mini: false, dual: false, speed: 285 },
+    { type: 'decoration', x: 2120, y: 190, w: 96, h: 96, value: 'circle', groups: [20], color: '#75ddbf' },
+    { type: 'trigger', x: 1830, y: 400, action: 'alpha', targetGroup: 20, opacity: 0.25, duration: 1 },
+    { type: 'trigger', x: 2250, y: 400, action: 'pulse', targetGroup: 20, color: '#ffbbdf', duration: 1.2 },
+    spike(2480, 2), coin(2540, 335), { type: 'trigger', x: 2800, y: 400, action: 'spawn', spawnGroup: 30, delay: 0.15 },
+    { type: 'trigger', x: 2800, y: 350, action: 'color', colorTarget: 'ground', color: '#6bcfbc', duration: 0.8, groups: [30], spawnTriggered: true },
+    { type: 'trigger', x: 3100, y: 400, action: 'camera', zoom: 1.08, duration: 1, easing: 'ease-in-out' },
+    spike(3520), coin(3580, 335), { type: 'trigger', x: 3880, y: 400, action: 'camera', zoom: 1, duration: 1 },
+  ]),
+  course('lab-ramp-garden', 'Ramp Garden', 'Slopes, checkpoints, and a jetpack above the garden.', 'Hard', '#76dfc5', 120, 220, 2900, [
+    { type: 'text', x: 650, y: 180, text: 'CLIMB · COLLECT · FLY', w: 320, h: 40, color: '#8be6c8', fontSize: 23 },
+    { type: 'slope', x: 820, y: 384, w: 192, h: 96, value: 'up' }, block(1012, 384, 96),
+    coin(1060, 335), { type: 'slope', x: 1108, y: 384, w: 192, h: 96, value: 'down' },
+    { type: 'checkpoint', x: 1390, y: 400, w: 32, h: 80 }, { type: 'saw', x: 1630, y: 450, w: 42, h: 42, radius: 21 },
+    { type: 'portal', x: 1890, y: 120, w: 32, h: 320, value: 'jetpack' }, coin(2070, 290),
+    block(2200, 408, 96, 72), { type: 'decoration', x: 2420, y: 220, w: 100, h: 100, value: 'diamond', color: '#88dfbd', rotation: 45 },
+    coin(2580, 240), { type: 'startpos', x: 1950, y: 320, mode: 'jetpack', speed: 220, gravity: 1, mini: false, dual: false },
+  ], true),
+  course('lab-warp-studio', 'Warp Studio', 'Explicit gravity, linked space, and safe changes of pace.', 'Hard', '#ffb5d7', 132, 300, 4800, [
+    { type: 'text', x: 660, y: 220, text: 'KEEP AN OPEN MIND', w: 300, h: 40, color: '#ffb5d7', fontSize: 22 },
+    portal(920, 'gravity:reverse'), coin(1290, 145), spike(1620, 2, 80), portal(2040, 'gravity:normal'),
+    { type: 'portal', x: 2490, y: 120, w: 32, h: 320, value: 'teleport', targetX: 2820, targetY: 464 },
+    coin(3040, 400), portal(3330, 'speed:fast'), spike(3720, 2), coin(3790, 335), portal(4200, 'speed:normal'),
+    { type: 'startpos', x: 2820, y: 464, mode: 'cube', speed: 300, gravity: 1, mini: false, dual: false },
+  ]),
+];
+
 function boundedNumber(value, fallback, min, max, field) {
   if (value === undefined || value === null || value === '') return fallback;
   const number = Number(value);
@@ -117,6 +155,27 @@ function boundedNumber(value, fallback, min, max, field) {
 
 function safeText(value, fallback, maxLength) {
   return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, maxLength) || fallback : fallback;
+}
+
+function enumValue(value, choices, fallback, field) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (!choices.includes(value)) throw new Error(`${field} has an unsupported value.`);
+  return value;
+}
+
+function integer(value, field, min = 1, max = 99999) {
+  const result = boundedNumber(value, null, min, max, field);
+  if (result === null || !Number.isInteger(result)) throw new Error(`${field} must be a whole number between ${min} and ${max}.`);
+  return result;
+}
+
+function booleanValue(value, field) {
+  if (typeof value !== 'boolean') throw new Error(`${field} must be true or false.`);
+  return value;
+}
+
+function normalizedId(value) {
+  return safeText(value, '', 100).replace(/[^a-zA-Z0-9_-]/g, '-');
 }
 
 /** Accepts a plain editor level or { version: 1, level }. Throws a readable Error for invalid data. */
@@ -132,7 +191,7 @@ export function normalizeLevel(input) {
   const objects = raw.objects.map((object, index) => {
     if (!object || typeof object !== 'object' || !OBJECT_TYPES.includes(object.type)) throw new Error(`Object ${index + 1} has an unsupported type.`);
     const type = object.type;
-    const defaults = { spike: [32, 32], block: [48, 48], coin: [24, 24], pad: [40, 6], orb: [32, 32], portal: [32, 320] }[type];
+    const defaults = { spike: [32, 32], block: [48, 48], slope: [96, 48], saw: [48, 48], coin: [24, 24], pad: [40, 6], orb: [32, 32], portal: [32, 320], checkpoint: [32, 80], trigger: [32, 32], startpos: [32, 32], decoration: [48, 48], text: [192, 40] }[type];
     const x = boundedNumber(object.x, null, 0, length, `Object ${index + 1} X`);
     const y = boundedNumber(object.y, null, 0, 480, `Object ${index + 1} Y`);
     if (x === null || y === null) throw new Error(`Object ${index + 1} needs X and Y coordinates.`);
@@ -144,11 +203,67 @@ export function normalizeLevel(input) {
     const result = { id: objectId, type, x, y, w: boundedNumber(object.w, defaults[0], 1, 2000, `Object ${index + 1} width`), h: boundedNumber(object.h, defaults[1], 1, 480, `Object ${index + 1} height`) };
     if (type === 'portal') {
       if (typeof object.value !== 'string') throw new Error(`Portal ${index + 1} needs a mode or effect.`);
-      if (MODES.includes(object.value) || ['mini', 'normal', 'gravity', 'dual'].includes(object.value)) result.value = object.value;
+      if (PORTAL_VALUES.includes(object.value)) result.value = object.value;
       else if (/^speed:\d+(?:\.\d+)?$/.test(object.value)) result.value = `speed:${boundedNumber(object.value.slice(6), 300, 100, 650, 'Portal speed')}`;
       else throw new Error(`Portal ${index + 1} has an unsupported effect.`);
-    } else if (type === 'spike' && object.value === 'down') result.value = 'down';
-    else if (type === 'pad' || type === 'orb') result.value = ['yellow', 'pink', 'red', 'blue', 'green', 'black'].includes(object.value) ? object.value : 'yellow';
+    } else if (type === 'spike' || type === 'slope') result.value = enumValue(object.value, ['up', 'down'], 'up', `${type} orientation`);
+    else if (type === 'pad' || type === 'orb') result.value = enumValue(object.value, EFFECT_VALUES, 'yellow', `${type} effect`);
+    if (object.groups !== undefined) {
+      if (!Array.isArray(object.groups) || object.groups.length > 64) throw new Error(`Object ${index + 1} needs an array of at most 64 group IDs.`);
+      result.groups = [...new Set(object.groups.map((group) => integer(group, 'Group ID')))];
+    }
+    for (const field of ['active', 'visible', 'preserveVelocity']) if (object[field] !== undefined) result[field] = booleanValue(object[field], field);
+    if (object.targetPlayer !== undefined) result.targetPlayer = enumValue(object.targetPlayer, ['one', 'two', 'both'], 'both', 'Target player');
+    if (object.targetId !== undefined && object.targetId !== '') {
+      if (typeof object.targetId !== 'string') throw new Error('Target object ID must be text.');
+      result.targetId = normalizedId(object.targetId);
+    }
+    for (const field of ['targetGroup', 'centerGroup']) if (object[field] !== undefined && object[field] !== '') result[field] = integer(object[field], field);
+    const numbers = {
+      targetX: [0, length], targetY: [0, 480], angle: [-3600, 3600], rotation: [-3600, 3600], opacity: [0, 1], z: [-100, 100], radius: [1, 1000],
+      duration: [0, 120], delay: [0, 120], moveX: [-40000, 40000], moveY: [-480, 480], centerX: [-40000, 40000], centerY: [-480, 960],
+      count: [-1000000, 1000000], targetCount: [-1000000, 1000000], zoom: [0.25, 4], cameraX: [-40000, 40000], cameraY: [-480, 960], cameraRotation: [-3600, 3600],
+      staticX: [-40000, 40000], staticY: [-480, 960], volume: [0, 1], dashDuration: [0.05, 10], fontSize: [8, 96],
+    };
+    for (const [field, [min, max]] of Object.entries(numbers)) if (object[field] !== undefined && object[field] !== '') {
+      if (object[field] === null || typeof object[field] === 'boolean' || typeof object[field] === 'object') throw new Error(`${field} must be a number.`);
+      result[field] = boundedNumber(object[field], null, min, max, field);
+    }
+    if (object.color !== undefined && object.color !== '') {
+      if (typeof object.color !== 'string' || !/^#[\da-fA-F]{6}$/.test(object.color)) throw new Error('Object color must be a six-digit hex color.');
+      result.color = object.color;
+    }
+    if (type === 'text') result.text = safeText(object.text, 'Your message', 240);
+    if (type === 'decoration') result.value = enumValue(object.value, ['square', 'circle', 'diamond', 'line'], 'diamond', 'Decoration shape');
+    if (type === 'startpos') {
+      result.mode = enumValue(object.mode, [...MODES, 'jetpack'], 'cube', 'Start mode');
+      result.mini = object.mini === undefined ? false : booleanValue(object.mini, 'Mini mode');
+      result.gravity = enumValue(object.gravity, [1, -1, 'normal', 'reverse'], 1, 'Start gravity');
+      result.speed = boundedNumber(object.speed, 300, 100, 650, 'Start speed');
+      result.dual = object.dual === undefined ? false : booleanValue(object.dual, 'Dual mode');
+      if (object.direction !== undefined) result.direction = enumValue(object.direction, [1, -1, 'left', 'right'], 1, 'Start direction');
+    }
+    if (type === 'trigger' || (['orb', 'pad'].includes(type) && result.value === 'trigger')) {
+      result.action = enumValue(object.action ?? (type === 'trigger' ? object.value : undefined), TRIGGER_ACTIONS, type === 'trigger' ? 'move' : 'spawn', 'Trigger action');
+      result.duration = boundedNumber(object.duration, 0, 0, 120, 'Trigger duration');
+      result.delay = boundedNumber(object.delay, 0, 0, 120, 'Trigger delay');
+      const aliases = { easeIn: 'ease-in', easeOut: 'ease-out', easeInOut: 'ease-in-out' };
+      result.easing = enumValue(aliases[object.easing] || object.easing, EASING_VALUES, 'linear', 'Easing');
+      for (const field of ['enabled', 'spawnTriggered', 'spawnOnly', 'touchTriggered', 'once', 'followX', 'followY']) if (object[field] !== undefined) result[field] = booleanValue(object[field], field);
+      if (object.spawnGroup !== undefined && object.spawnGroup !== '') result.spawnGroup = integer(object.spawnGroup, 'Spawn group');
+      if (object.counterId !== undefined && object.counterId !== '') result.counterId = integer(object.counterId, 'Counter ID');
+      if (object.operation !== undefined) result.operation = enumValue(object.operation, ['add', 'set', 'multiply', 'divide'], 'add', 'Counter operation');
+      if (result.operation === 'divide' && result.count === 0) throw new Error('A pickup counter cannot divide by zero.');
+      if (object.followPlayer !== undefined) result.followPlayer = enumValue(object.followPlayer, ['one', 'two'], 'one', 'Follow player');
+      if (object.gravityValue !== undefined) result.gravityValue = enumValue(object.gravityValue, [1, -1, 'normal', 'reverse', 'toggle'], 'toggle', 'Gravity effect');
+      if (object.colorTarget !== undefined) result.colorTarget = enumValue(object.colorTarget, ['background', 'ground', 'group'], 'background', 'Color target');
+      if (object.soundId !== undefined) result.soundId = normalizedId(object.soundId);
+      for (const field of ['channel', 'soundChannel']) if (object[field] !== undefined && object[field] !== '') {
+        if (typeof object[field] === 'number') result[field] = integer(object[field], 'Sound channel');
+        else if (typeof object[field] === 'string') result[field] = normalizedId(object[field]);
+        else throw new Error('Sound channel must be text or a positive integer.');
+      }
+    }
     return result;
   }).sort((a, b) => a.x - b.x || a.y - b.y);
   return {
